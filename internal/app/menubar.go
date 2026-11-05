@@ -66,6 +66,7 @@ typedef struct {
     char ane_color[8];
     char mem_color[8];
     char label_color[8];
+    char bar_order[64];
 } menubar_config_t;
 
 int initMenuBar(void);
@@ -158,6 +159,14 @@ func applyMenuBarConfig() {
 	copyColorToCBuf(&ccfg.ane_color, mbCfg.ANEColor)
 	copyColorToCBuf(&ccfg.mem_color, mbCfg.MemColor)
 	copyColorToCBuf(&ccfg.label_color, mbCfg.LabelColor)
+	copyToCCharBuf(unsafe.Pointer(&ccfg.bar_order), mbCfg.BarOrder, 64)
+	mbCfg.ShowCPU = cBoolToPtr(ccfg.show_cpu)
+	mbCfg.ShowGPU = cBoolToPtr(ccfg.show_gpu)
+	mbCfg.ShowANE = cBoolToPtr(ccfg.show_ane)
+	mbCfg.ShowMemory = cBoolToPtr(ccfg.show_memory)
+	mbCfg.ShowPower = cBoolToPtr(ccfg.show_power)
+	mbCfg.ShowPercent = cBoolToPtr(ccfg.show_percent)
+	nativeMenuBarPreferences.record(menuBarSnapshotValues(mbCfg))
 	C.setMenuBarConfig(&ccfg)
 }
 
@@ -173,37 +182,8 @@ func cBoolToPtr(v C.int) *bool {
 func GoSaveMenuBarConfig(statusBarWidth, statusBarHeight, sparklineWidth, sparklineHeight, showCPU, showGPU, showANE, showMem, showPower, showPercent,
 	fontSize, powerFontSize C.int,
 	cpuHex, gpuHex, aneHex, memHex, labelHex *C.char) {
-	if currentConfig.MenuBar == nil {
-		currentConfig.MenuBar = &MenuBarConfig{}
-	}
-	m := currentConfig.MenuBar
-
-	if statusBarWidth > 0 {
-		m.StatusBarWidth = int(statusBarWidth)
-	}
-	if statusBarHeight > 0 {
-		m.StatusBarHeight = int(statusBarHeight)
-	}
-	if sparklineWidth > 0 {
-		m.SparklineWidth = int(sparklineWidth)
-	}
-	if sparklineHeight > 0 {
-		m.SparklineHeight = int(sparklineHeight)
-	}
-	m.ShowCPU = cBoolToPtr(showCPU)
-	m.ShowGPU = cBoolToPtr(showGPU)
-	m.ShowANE = cBoolToPtr(showANE)
-	m.ShowMemory = cBoolToPtr(showMem)
-	m.ShowPower = cBoolToPtr(showPower)
-	m.ShowPercent = cBoolToPtr(showPercent)
-
-	if fontSize > 0 {
-		m.FontSize = int(fontSize)
-	}
-	if powerFontSize > 0 {
-		m.PowerFontSize = int(powerFontSize)
-	}
-
+	m := MenuBarConfig{StatusBarWidth: int(statusBarWidth), StatusBarHeight: int(statusBarHeight), SparklineWidth: int(sparklineWidth), SparklineHeight: int(sparklineHeight),
+		ShowCPU: cBoolToPtr(showCPU), ShowGPU: cBoolToPtr(showGPU), ShowANE: cBoolToPtr(showANE), ShowMemory: cBoolToPtr(showMem), ShowPower: cBoolToPtr(showPower), ShowPercent: cBoolToPtr(showPercent), FontSize: int(fontSize), PowerFontSize: int(powerFontSize)}
 	if cpuHex != nil {
 		m.CPUColor = C.GoString(cpuHex)
 	}
@@ -220,7 +200,10 @@ func GoSaveMenuBarConfig(statusBarWidth, statusBarHeight, sparklineWidth, sparkl
 		m.LabelColor = C.GoString(labelHex)
 	}
 
-	saveConfig()
+	if err := nativeMenuBarPreferences.commit(menuBarSnapshotValues(m)); err != nil {
+		stderrLogger.Printf("Menu bar settings were not saved: %v", err)
+	}
+
 }
 
 // GoI18nT provides direct translation lookup to Objective-C

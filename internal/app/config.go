@@ -5,18 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
-	"time"
-)
-
-// Coalesce rapid saveConfig calls into one disk write so if you spam +/- (which I do a lot) it doesn't block the event loop on per-press file I/O.
-const saveDebounceInterval = 500 * time.Millisecond
-
-var (
-	saveDebounceMu    sync.Mutex
-	saveDebounceTimer *time.Timer
-	pendingSaveData   []byte
-	pendingSavePath   string
 )
 
 // CustomThemeConfig holds custom hex color values for theming
@@ -47,7 +35,7 @@ type MenuBarConfig struct {
 	StatusBarWidth  int    `json:"status_bar_width,omitempty"`  // Width of each bar in status bar (px, default: 24)
 	StatusBarHeight int    `json:"status_bar_height,omitempty"` // Height/thickness of status bar (px, default: 18)
 	SparklineWidth  int    `json:"sparkline_width,omitempty"`   // Width of sparkline graphs in dropdown (px, default: 300)
-	SparklineHeight int    `json:"sparkline_height,omitempty"`  // Height of sparkline graphs in dropdown (px, default: 40)
+	SparklineHeight int    `json:"sparkline_height,omitempty"`  // Height of sparkline graphs in dropdown (px, default: 80)
 	ShowCPU         *bool  `json:"show_cpu,omitempty"`          // Show CPU bar in status bar (default: true)
 	ShowGPU         *bool  `json:"show_gpu,omitempty"`          // Show GPU bar in status bar (default: true)
 	ShowANE         *bool  `json:"show_ane,omitempty"`          // Show ANE bar in status bar (default: true)
@@ -78,7 +66,51 @@ type OverlayConfig struct {
 	ExpandedOrder []string `json:"expanded_order,omitempty"`
 
 	// Opacity overrides the overlay opacity (0.15-1.0)
-	Opacity *float64 `json:"opacity,omitempty"`
+	Opacity  *float64 `json:"opacity,omitempty"`
+	Sections string   `json:"sections,omitempty"`
+}
+
+// New UI preferences do not change the original interface's appearance.
+type HtopConfig struct {
+	Layout     string           `json:"layout,omitempty"`
+	Background string           `json:"background,omitempty"`
+	BarStyle   string           `json:"bar_style,omitempty"`
+	TopMetric  string           `json:"top_metric,omitempty"`
+	Colors     *HtopColorConfig `json:"colors,omitempty"`
+}
+
+type HtopColorConfig struct {
+	Foreground          string `json:"foreground,omitempty"`
+	CPU                 string `json:"cpu,omitempty"`
+	GPU                 string `json:"gpu,omitempty"`
+	Memory              string `json:"memory,omitempty"`
+	ANE                 string `json:"ane,omitempty"`
+	Bandwidth           string `json:"bandwidth,omitempty"`
+	Network             string `json:"network,omitempty"`
+	Power               string `json:"power,omitempty"`
+	Thunderbolt         string `json:"thunderbolt,omitempty"`
+	ProcessList         string `json:"processList,omitempty"`
+	ProcessListDim      string `json:"processListDim,omitempty"`
+	ProcessListSelected string `json:"processListSelected,omitempty"`
+	SystemInfo          string `json:"systemInfo,omitempty"`
+	CPUNice             string `json:"cpu_nice,omitempty"`
+	CPUSystem           string `json:"cpu_system,omitempty"`
+}
+
+type UnitConfig struct {
+	Network     string `json:"network,omitempty"`
+	Disk        string `json:"disk,omitempty"`
+	Temperature string `json:"temperature,omitempty"`
+}
+
+type OutputConfig struct {
+	Format string `json:"format,omitempty"`
+	Pretty bool   `json:"pretty,omitempty"`
+	Count  int    `json:"count,omitempty"`
+}
+
+type ServiceConfig struct {
+	PrometheusAddress string `json:"prometheus_address,omitempty"`
 }
 
 type AppConfig struct {
@@ -93,6 +125,11 @@ type AppConfig struct {
 	CustomTheme   *CustomThemeConfig `json:"custom_theme,omitempty"`
 	MenuBar       *MenuBarConfig     `json:"menubar,omitempty"`
 	Overlay       *OverlayConfig     `json:"overlay,omitempty"`
+	Htop          *HtopConfig        `json:"htop,omitempty"`
+	Units         *UnitConfig        `json:"units,omitempty"`
+	Output        *OutputConfig      `json:"output,omitempty"`
+	Services      *ServiceConfig     `json:"services,omitempty"`
+	ThemeSource   string             `json:"theme_source,omitempty"`
 }
 
 // intOrDefault returns v if > 0, otherwise def.
@@ -197,6 +234,7 @@ func loadOverlayConfig() OverlayConfig {
 		return cfg
 	}
 	o := currentConfig.Overlay
+	cfg.Sections = o.Sections
 	if len(o.CollapsedSections) > 0 {
 		filtered := filterValidSections(o.CollapsedSections)
 		if len(filtered) > 0 {
@@ -273,97 +311,6 @@ func migrateThemeName(theme string) string {
 		return after
 	}
 	return theme
-}
-
-func loadConfig() {
-	temporaryLayout = false
-	configPath := mactopConfigPath("config.json")
-
-	file, err := os.ReadFile(configPath)
-	if err != nil {
-		currentConfig = AppConfig{DefaultLayout: "default"}
-		return
-	}
-
-	err = json.Unmarshal(file, &currentConfig)
-	if err != nil {
-		currentConfig = AppConfig{DefaultLayout: "default"}
-	}
-
-	if currentConfig.Theme != "" {
-		newTheme := migrateThemeName(currentConfig.Theme)
-		if newTheme != currentConfig.Theme {
-			currentConfig.Theme = newTheme
-			saveConfig()
-		}
-	}
-}
-
-func saveConfig() {
-	configDir := mactopConfigDir()
-	if err := os.MkdirAll(configDir, 0755); err != nil {
-		return
-	}
-	configPath := filepath.Join(configDir, "config.json")
-
-	// Toggle-opened Info/Fan views must not replace the stable layout. Fan
-	// selected by cycling or loaded from config is a persistent layout.
-	config := currentConfig
-	if temporaryLayout {
-		config.DefaultLayout = lastActiveLayout
-		if config.DefaultLayout == "" {
-			config.DefaultLayout = LayoutDefault
-		}
-	}
-	data, err := json.MarshalIndent(config, "", "  ")
-	if err != nil {
-		return
-	}
-
-	// Marshal at schedule time so the value the user just set is the one that lands on disk, even if currentConfig keeps changing before the timer fires.
-	saveDebounceMu.Lock()
-	pendingSaveData = data
-	pendingSavePath = configPath
-	if saveDebounceTimer != nil {
-		saveDebounceTimer.Stop()
-	}
-	saveDebounceTimer = time.AfterFunc(saveDebounceInterval, flushPendingSave)
-	saveDebounceMu.Unlock()
-}
-
-func flushPendingSave() {
-	saveDebounceMu.Lock()
-	data := pendingSaveData
-	path := pendingSavePath
-	pendingSaveData = nil
-	pendingSavePath = ""
-	saveDebounceMu.Unlock()
-
-	if data != nil && path != "" {
-		saveConfigNow(data, path)
-	}
-}
-
-// saveConfigFlush forces any pending debounced save to disk.
-func saveConfigFlush() {
-	saveDebounceMu.Lock()
-	if saveDebounceTimer != nil {
-		saveDebounceTimer.Stop()
-		saveDebounceTimer = nil
-	}
-	data := pendingSaveData
-	path := pendingSavePath
-	pendingSaveData = nil
-	pendingSavePath = ""
-	saveDebounceMu.Unlock()
-
-	if data != nil && path != "" {
-		saveConfigNow(data, path)
-	}
-}
-
-func saveConfigNow(data []byte, path string) {
-	os.WriteFile(path, data, 0644)
 }
 
 // loadThemeFile loads custom theme from the mactop config directory if it exists

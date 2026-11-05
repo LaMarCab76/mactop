@@ -141,7 +141,7 @@ var (
 )
 
 func isPortsLayoutActive() bool {
-	return currentConfig.DefaultLayout == LayoutPorts
+	return effectiveLayout() == LayoutPorts
 }
 
 type portListener struct {
@@ -563,13 +563,13 @@ func buildPortRows(ports []PortMetrics, maxWidths map[string]int) []string {
 
 func getPortsListTitle() (string, ui.Style) {
 	var titleColor ui.Color = ui.ColorClear
-	if currentConfig.CustomTheme != nil && currentConfig.CustomTheme.ProcessList != "" {
-		if color, err := ParseHexColor(currentConfig.CustomTheme.ProcessList); err == nil {
+	if effectiveCustomTheme() != nil && effectiveCustomTheme().ProcessList != "" {
+		if color, err := ParseHexColor(effectiveCustomTheme().ProcessList); err == nil {
 			titleColor = color
 		}
 	}
 	if titleColor == ui.ColorClear {
-		titleColor = GetThemeColorWithLightMode(currentConfig.Theme, IsLightMode)
+		titleColor = GetThemeColorWithLightMode(effectiveThemeName(), IsLightMode)
 	}
 	if isHtopMode() {
 		titleColor = htopPalette().user

@@ -44,7 +44,7 @@ func TestStartupMenuSelectionAndCancellation(t *testing.T) {
 		want     string
 		accepted bool
 	}{
-		{[]string{"1"}, UIModeHtop, true}, {[]string{"2"}, UIModeOriginal, true},
+		{[]string{"1", "1"}, UIModeHtop, true}, {[]string{"2"}, UIModeOriginal, true},
 		{[]string{"<Down>", "<Enter>"}, UIModeOriginal, true},
 		{[]string{"q"}, "", false}, {[]string{"<Escape>"}, "", false}, {[]string{"<C-c>"}, "", false},
 		{nil, "", false},
@@ -125,6 +125,29 @@ func TestStartupMenuRenderingIsClippedAndOrdered(t *testing.T) {
 			if first < 0 || second <= first {
 				t.Fatal("startup choices were missing or out of order")
 			}
+		}
+	}
+}
+
+func TestStartupMenuKeyHintsMatchRootAndSubmenu(t *testing.T) {
+	i18n.Init("en")
+	for _, root := range []bool{true, false} {
+		menu := newStartupModeMenu("")
+		if !root {
+			menu.choices = []string{"Start", "Settings", "Back"}
+		}
+		menu.SetRect(0, 0, 80, 24)
+		buf := ui.NewBuffer(image.Rect(0, 0, 80, 24))
+		menu.Draw(buf)
+		var text strings.Builder
+		for _, cell := range buf.Cells {
+			text.WriteRune(cell.Rune)
+		}
+		if root && (!strings.Contains(text.String(), "q/Esc: exit") || strings.Contains(text.String(), "1/2/3")) {
+			t.Fatal("root hints do not match root handlers")
+		}
+		if !root && (!strings.Contains(text.String(), "Esc: back") || !strings.Contains(text.String(), "1/2/3")) {
+			t.Fatal("submenu hints do not match submenu handlers")
 		}
 	}
 }

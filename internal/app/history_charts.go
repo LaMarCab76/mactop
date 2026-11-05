@@ -89,11 +89,11 @@ func aneVisibleSeries(visibleWidth int, bwMode bool) []float64 {
 // LineColors assignments must route through this so they don't clobber the
 // colors applyCustomWidgetColors applied (same pattern as updateSoCPowerHistory).
 func historyLineColor(pick func(*CustomThemeConfig) string, fallback ui.Color) ui.Color {
-	if currentConfig.CustomTheme == nil {
+	if effectiveCustomTheme() == nil {
 		return fallback
 	}
-	fg := GetThemeColorWithLightMode(currentConfig.Theme, IsLightMode)
-	return resolveCustomColor(pick(currentConfig.CustomTheme), fg)
+	fg := GetThemeColorWithLightMode(effectiveThemeName(), IsLightMode)
+	return resolveCustomColor(pick(effectiveCustomTheme()), fg)
 }
 
 // seriesMax returns the largest value in the series (0 for an empty one).
@@ -113,7 +113,7 @@ func seriesMax(series []float64) float64 {
 // %, so plotting the IORegistry power-state duty here would diverge — return
 // false to fall through to the gauge-consistent single-series path.
 func renderDualANEClusterChart(cpuMetrics CPUMetrics, visibleWidth int, maxVal, cluster0, cluster1 float64) bool {
-	if currentConfig.DefaultLayout != LayoutHistorySoC || !shouldRenderDualANEClusters(cpuMetrics) || len(aneCluster0History) == 0 {
+	if effectiveLayout() != LayoutHistorySoC || !shouldRenderDualANEClusters(cpuMetrics) || len(aneCluster0History) == 0 {
 		return false
 	}
 	visibleC0 := aneCluster0History[len(aneCluster0History)-visibleWidth:]
@@ -161,12 +161,12 @@ func renderPowerStateANEChart(cpuMetrics CPUMetrics, anePct, aneWatts, aneBW flo
 		state = aneOnOffLabel(anePct)
 	}
 	aneColor := ui.ColorRed
-	if currentConfig.DefaultLayout != LayoutHistorySoC {
+	if effectiveLayout() != LayoutHistorySoC {
 		aneColor = ui.ColorMagenta
 	}
 	aneHistoryChart.LineColors = []ui.Color{historyLineColor(func(t *CustomThemeConfig) string { return t.ANE }, aneColor)}
 	aneHistoryChart.DataLabels = []string{state}
-	aneHistoryChart.Title = aneChartTitle(cpuMetrics, anePct, 0, aneWatts, aneBW, bwMode, currentConfig.DefaultLayout == LayoutHistorySoC)
+	aneHistoryChart.Title = aneChartTitle(cpuMetrics, anePct, 0, aneWatts, aneBW, bwMode, effectiveLayout() == LayoutHistorySoC)
 	aneHistoryChart.MaxVal = scaleMax
 	return true
 }
@@ -210,7 +210,7 @@ func renderANEHistoryChart(cpuMetrics CPUMetrics, anePct, aneWatts, aneBW float6
 		return
 	}
 	aneHistoryChart.DataLabels = []string{fmt.Sprintf("%.1f%%", anePct)}
-	if currentConfig.DefaultLayout == LayoutHistorySoC {
+	if effectiveLayout() == LayoutHistorySoC {
 		// Peak: in bandwidth mode use the max of the visible window — ANE
 		// load is typically flat at saturation, so the decaying tracker
 		// collapses to the current value within two ticks and the label
@@ -292,7 +292,7 @@ func renderBandwidthHistoryChart(readGBs, writeGBs, aneReadGBs, aneWriteGBs floa
 	{
 		termWidth, _ := GetCachedTerminalDimensions()
 		visibleWidth := (termWidth / 2) - 4
-		if currentConfig.DefaultLayout == LayoutHistorySoC {
+		if effectiveLayout() == LayoutHistorySoC {
 			// One-third-width column in the bottom row — match the adjacent
 			// memory and SSD charts' time window.
 			visibleWidth = (termWidth / 3) - 4
@@ -316,7 +316,7 @@ func renderBandwidthHistoryChart(readGBs, writeGBs, aneReadGBs, aneWriteGBs floa
 		// participate in scaling or it clips against the chart top whenever
 		// read and write are both high in the same sample.
 		var visibleTotal []float64
-		if currentConfig.DefaultLayout == LayoutHistorySoC {
+		if effectiveLayout() == LayoutHistorySoC {
 			visibleTotal = make([]float64, len(visibleRead))
 			for i := range visibleRead {
 				visibleTotal[i] = visibleRead[i] + visibleWrite[i]
@@ -327,11 +327,11 @@ func renderBandwidthHistoryChart(readGBs, writeGBs, aneReadGBs, aneWriteGBs floa
 
 		// In history_soc layout, force a minimum visible scale so the graph
 		// doesn't look completely dead when bandwidth is low (common even with high GPU/ANE load)
-		if currentConfig.DefaultLayout == LayoutHistorySoC && scaleMax < 8.0 {
+		if effectiveLayout() == LayoutHistorySoC && scaleMax < 8.0 {
 			scaleMax = 8.0
 		}
 
-		if currentConfig.DefaultLayout == LayoutHistorySoC {
+		if effectiveLayout() == LayoutHistorySoC {
 			currentPeak := 0.0
 			if len(visiblePeak) > 0 {
 				currentPeak = visiblePeak[len(visiblePeak)-1]
@@ -385,7 +385,7 @@ func updateSoCPowerHistory(cpuMetrics CPUMetrics) {
 	if socPowerHistoryChart != nil {
 		termWidth, _ := GetCachedTerminalDimensions()
 		visibleWidth := termWidth - 4
-		if currentConfig.DefaultLayout == LayoutHistorySoC {
+		if effectiveLayout() == LayoutHistorySoC {
 			// Half-width column (row 2, beside the ANE chart) — match the
 			// neighboring CPU/GPU/ANE charts' time window.
 			visibleWidth = (termWidth / 2) - 4
@@ -444,11 +444,11 @@ func updateSoCPowerHistory(cpuMetrics CPUMetrics) {
 		// top). Resolve per-component custom theme colors when set instead of
 		// clobbering them with hard-coded defaults every tick.
 		cpuC, gpuC, memC := ui.ColorYellow, ui.ColorGreen, ui.ColorCyan
-		if currentConfig.CustomTheme != nil {
-			fg := GetThemeColorWithLightMode(currentConfig.Theme, IsLightMode)
-			cpuC = resolveCustomColor(currentConfig.CustomTheme.CPU, fg)
-			gpuC = resolveCustomColor(currentConfig.CustomTheme.GPU, fg)
-			memC = resolveCustomColor(currentConfig.CustomTheme.Memory, fg)
+		if effectiveCustomTheme() != nil {
+			fg := GetThemeColorWithLightMode(effectiveThemeName(), IsLightMode)
+			cpuC = resolveCustomColor(effectiveCustomTheme().CPU, fg)
+			gpuC = resolveCustomColor(effectiveCustomTheme().GPU, fg)
+			memC = resolveCustomColor(effectiveCustomTheme().Memory, fg)
 		}
 		socPowerHistoryChart.LineColors = []ui.Color{cpuC, gpuC, memC, ui.ColorRed}
 

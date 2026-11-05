@@ -406,43 +406,75 @@ Run **`mactop`** to open the startup menu:
 1. **New TUI (htop)**
 2. **Original**
 
-Use the arrow keys and Enter, or press `1`/`2` to open a mode directly. `q`, Esc
-or Ctrl-C closes the menu without starting monitoring. The menu highlights your
-last choice and remembers a confirmed selection. Original keeps the existing
-layouts and theme behavior. Press **`v`** inside the monitor to switch modes and
-save that preference. To skip the menu and select a mode for one session:
+Use the arrow keys and Enter, or press `1`/`2`. **New TUI** opens a submenu
+with **Start**, **Settings**, and **Back**; Original starts directly. `q` or
+Ctrl-C exits before monitoring starts. The root menu highlights the last chosen
+interface. A confirmed menu selection updates the preferred interface, including
+when Start follows an earlier edit in Settings. Press **`v`** inside the monitor
+to switch and save that preference.
+To skip the menu for one session:
 
 ```sh
 mactop --ui-mode htop
 mactop --ui-mode original
 ```
 
-The flag does not change the saved mode, even if you save another setting.
-The preference is stored as `"ui_mode": "original"` or `"ui_mode": "htop"` in
-`config.json`. Headless output, native menu bar/overlay modes, diagnostics,
-`--help` and `--version` do not show the startup menu.
+CLI overrides are temporary and do not become preferences when another option is
+saved. Headless output, native menu bar/overlay modes, diagnostics, `--help` and
+`--version` bypass the startup menu.
 
-In htop mode, the default layout shows a full-width panel of per-core CPU bars
-above GPU, memory, ANE, power, network/disk and processes. The CPU bars use
-**blue for nice (low priority), green for user time, and red for system time**.
-All segments and the total come from the same native CPU sample. An unavailable
-sample is shown as `--`. E/P/S labels follow the detected Apple Silicon topology.
-CPU/memory use green accents, GPU/network cyan, ANE magenta, and power yellow.
-History charts use the same component palette; memory-pressure warnings retain
-their warning/critical colors. Memory continues to show macTop's native macOS
-measurement rather than Linux buffer/cache segments.
+**Settings** is also available with **F2** in the new interface. Tab/Shift-Tab
+changes category; arrows navigate or choose a value; Enter edits; `d` restores
+the default; **F10 saves** and **Esc cancels**. Edits stay in a separate draft
+until a successful save. The editor includes interface layouts, colors,
+interval, language, units, process ordering, headless output defaults, and all
+menu bar/overlay preferences. Optional fields distinguish the default from an
+explicit value. Session overrides and when a change takes effect are shown.
+Language changes apply to the next process; native preferences apply the next
+time that mode is explicitly opened. Launch modes, PID filters, diagnostics,
+Prometheus and fan operations have command information; saving settings never
+activates them. PID filters remain session-only because PIDs can be recycled.
 
-Other layouts remain available with `l`/`L`. The default htop layout adapts its CPU
-panel to the terminal size. Narrow columns show compact percentages, and a
-`+N cores` message identifies cores that do not fit. Below 18 terminal rows, the
-default htop layout prioritizes CPU and processes; enlarge the terminal to see
-the other panels. The CPU panel's bottom border and `h`/`?` help show the legend.
+The new interface uses an **explicit RGB black background by default**, separate
+from Original. Choose another background in Settings or with `b`/`B`. The CLI
+`--bg` override follows the active interface for that session. Block meters and
+history charts use a gradient within each component's color; Classic `|` and
+plain blocks remain selectable. CPU bars retain **blue for nice, green for user,
+and red for system time**, all from the same native CPU sample. An unavailable
+core sample shows `--`. E/P/S labels follow the detected Apple Silicon topology.
+GPU/network use cyan, memory/power yellow, and ANE magenta. Warning colors and
+binary ANE power-state labels keep their meaning. Memory uses macOS measurements.
 
-The htop palette temporarily takes precedence over preset and custom component
-colors. Returning to Original restores those styles and retains your layout,
-background, search, sort and selection. Party mode pauses its automatic theme
-changes while htop is active and resumes in Original. Explicit theme changes
-with `c`/`C` retain their existing behavior. Colors adapt for light terminals.
+Choose the **Top 3** layout in Settings or with `l`/`L`. It shows one process list
+ranked by **CPU, resident memory (RES), or GPU**. Left/Right changes the criterion.
+Search filters the full snapshot before ranking, ties use ascending PID, and
+unavailable values do not become fake zeros. Partial coverage is identified.
+Freeze stops automatic sample updates; a confirmed F9 refreshes the list
+explicitly. In Top 3, F9 validates the displayed process identity before signalling.
+Original retains its existing 500-process projection and layouts. Each interface
+remembers its own layout, including temporary Info/Fan return state.
+
+All previous layouts remain available. The default new layout adapts its CPU
+panel to the terminal size, using compact percentages or an omitted-core count
+when necessary. Below 18 rows it prioritizes CPU and processes.
+
+Original's colors are independent. With `theme_source: "auto"` (the default),
+`theme.json` keeps its previous precedence over saved colors. Editing Original
+colors in Settings selects `theme_source: "config"`; `I` imports the file into
+the draft first if desired. Import replaces the known component overrides; a
+component omitted from the file returns to the preset default. Legacy aliases
+and unknown configuration keys are preserved. The editor never writes
+`theme.json`. CLI primary
+colors still take precedence for the session. In Original, `c`/`C` selects a
+preset and resets known component overrides; in the new interface it opens
+color settings. Party mode changes presentation temporarily, pauses in the new
+interface, and never persists its automatic theme changes.
+
+Configuration writes preserve unknown keys, merge only edited fields and use
+an atomic replacement. An invalid JSON document is preserved with an error;
+a failed editor save retains the draft. Stored intervals also apply to explicit headless runs; machine-readable metrics
+retain their documented units. `output.*` preferences are
+used only with `--headless`, without changing `--fan-status` formatting.
 
 ## Example Theme (Green) Screenshot (mactop -c green) on Advanced layout (Hit "l" key to toggle)
 

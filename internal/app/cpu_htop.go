@@ -145,7 +145,7 @@ func (w *CPUCoreWidget) drawHtopCore(buf *ui.Buffer, x, y, width, index int) {
 		color, char := p.text, ' '
 		for s, end := range ends {
 			if i < end {
-				color, char = colors[s], '|'
+				color, char = meterColor(colors[s], i, barWidth), meterGlyph()
 				break
 			}
 		}

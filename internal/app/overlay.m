@@ -1,3 +1,4 @@
+extern int GoSaveOverlayConfig(char *collapsed,char *expanded,double opacity);
 // Copyright (c) 2024-2026 Carsen Klock under MIT License
 // overlay.m - Native macOS floating overlay HUD window
 
@@ -402,50 +403,19 @@ static void saveSettingsToConfig(void) {
   parseSectionList(g_overlay_config.collapsed_sections, g_collapsedSections, &g_collapsedCount);
   parseSectionList(g_overlay_config.expanded_order, g_expandedSections, &g_expandedCount);
 
-  // Write to ~/.mactop/config.json
-  const char *home = getenv("HOME");
-  if (!home) return;
+  // Persist through the Go repository (XDG, leaf merge, lock and errors).
+  // Copy the strings before leaving the Cocoa thread; stack buffers expire.
+  NSString *savedCollapsed = [NSString stringWithUTF8String:collapsed];
+  NSString *savedExpanded = [NSString stringWithUTF8String:expanded];
+  double savedOpacity = g_overlay_config.opacity;
+  static dispatch_queue_t preferenceQueue;
+  static dispatch_once_t preferenceQueueOnce;
+  dispatch_once(&preferenceQueueOnce, ^{ preferenceQueue=dispatch_queue_create("macTop.overlay.preferences",DISPATCH_QUEUE_SERIAL); });
+  dispatch_async(preferenceQueue, ^{
+    if (!GoSaveOverlayConfig((char *)savedCollapsed.UTF8String,(char *)savedExpanded.UTF8String,savedOpacity))
+      NSLog(@"macTop: overlay settings were not saved; see mactop.log");
+  });
 
-  char configDir[512], configPath[512];
-  snprintf(configDir, sizeof(configDir), "%s/.mactop", home);
-  snprintf(configPath, sizeof(configPath), "%s/config.json", configDir);
-  mkdir(configDir, 0755);
-
-  // Read existing config
-  NSData *existingData = [NSData dataWithContentsOfFile:
-      [NSString stringWithUTF8String:configPath]];
-  NSMutableDictionary *config;
-  if (existingData) {
-    config = [NSJSONSerialization JSONObjectWithData:existingData options:NSJSONReadingMutableContainers error:nil];
-    if (!config || ![config isKindOfClass:[NSDictionary class]]) {
-      config = [NSMutableDictionary dictionary];
-    }
-  } else {
-    config = [NSMutableDictionary dictionary];
-  }
-
-  // Build overlay section — use the order-preserved C strings we just built
-  NSMutableArray *collapsedArr = [NSMutableArray array];
-  NSMutableArray *expandedArr = [NSMutableArray array];
-  parseSectionList(collapsed, g_collapsedSections, &g_collapsedCount);
-  for (int i = 0; i < g_collapsedCount; i++)
-    [collapsedArr addObject:[NSString stringWithUTF8String:sectionConfigName(g_collapsedSections[i])]];
-  parseSectionList(expanded, g_expandedSections, &g_expandedCount);
-  for (int i = 0; i < g_expandedCount; i++)
-    [expandedArr addObject:[NSString stringWithUTF8String:sectionConfigName(g_expandedSections[i])]];
-
-  NSMutableDictionary *overlayDict = [NSMutableDictionary dictionary];
-  overlayDict[@"collapsed_sections"] = collapsedArr;
-  overlayDict[@"expanded_order"] = expandedArr;
-  overlayDict[@"opacity"] = @(g_overlay_config.opacity);
-  config[@"overlay"] = overlayDict;
-
-  // Write back
-  NSData *jsonData = [NSJSONSerialization dataWithJSONObject:config
-      options:NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys error:nil];
-  if (jsonData) {
-    [jsonData writeToFile:[NSString stringWithUTF8String:configPath] atomically:YES];
-  }
 }
 
 // Settings panel: hit rects for checkboxes (stored during drawRect, checked in mouseDown)

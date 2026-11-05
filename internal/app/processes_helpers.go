@@ -22,25 +22,25 @@ func resolveProcessThemeColor() (string, string) {
 	var themeColorStr string
 
 	// Check if custom ProcessList color is set
-	if currentConfig.CustomTheme != nil && currentConfig.CustomTheme.ProcessList != "" {
-		if IsHexColor(currentConfig.CustomTheme.ProcessList) {
-			themeColorStr = currentConfig.CustomTheme.ProcessList
+	if effectiveCustomTheme() != nil && effectiveCustomTheme().ProcessList != "" {
+		if IsHexColor(effectiveCustomTheme().ProcessList) {
+			themeColorStr = effectiveCustomTheme().ProcessList
 		}
 	}
 
 	if themeColorStr == "" {
 		// Check if the theme is a hex color
-		if IsHexColor(currentConfig.Theme) {
-			themeColorStr = currentConfig.Theme
-		} else if IsPaletteTheme(currentConfig.Theme) {
-			themeColorStr = GetPaletteHex(currentConfig.Theme, "Primary")
-		} else if IsLightMode && currentConfig.Theme == "white" {
+		if IsHexColor(effectiveThemeName()) {
+			themeColorStr = effectiveThemeName()
+		} else if IsPaletteTheme(effectiveThemeName()) {
+			themeColorStr = GetPaletteHex(effectiveThemeName(), "Primary")
+		} else if IsLightMode && effectiveThemeName() == "white" {
 			themeColorStr = "black"
-		} else if currentConfig.Theme == "1977" {
+		} else if effectiveThemeName() == "1977" {
 			themeColorStr = "green"
-		} else if color, ok := colorMap[currentConfig.Theme]; ok {
-			hexStr := resolveThemeColorString(currentConfig.Theme)
-			if hexStr != currentConfig.Theme {
+		} else if color, ok := colorMap[effectiveThemeName()]; ok {
+			hexStr := resolveThemeColorString(effectiveThemeName())
+			if hexStr != effectiveThemeName() {
 				themeColorStr = hexStr
 			} else {
 				themeColorStr = getThemeColorName(color)
@@ -62,8 +62,8 @@ func resolveSelectedHeaderFg(themeColorStr string) string {
 	if IsLightMode {
 		return "#020202"
 	}
-	if IsPaletteTheme(currentConfig.Theme) {
-		return GetPaletteHex(currentConfig.Theme, "Base")
+	if IsPaletteTheme(effectiveThemeName()) {
+		return GetPaletteHex(effectiveThemeName(), "Base")
 	}
 	if IsHexColor(themeColorStr) {
 		if IsLightHexColor(themeColorStr) {
@@ -71,7 +71,7 @@ func resolveSelectedHeaderFg(themeColorStr string) string {
 		}
 		return "#ffffff"
 	}
-	if isLightNamedTheme(currentConfig.Theme) {
+	if isLightNamedTheme(effectiveThemeName()) {
 		return "#020202"
 	}
 	return "#ffffff"
@@ -80,13 +80,13 @@ func resolveSelectedHeaderFg(themeColorStr string) string {
 func getProcessListTitle() (string, ui.Style) {
 	// Resolve title color (use process list color if set)
 	var titleColor ui.Color = ui.ColorClear
-	if currentConfig.CustomTheme != nil && currentConfig.CustomTheme.ProcessList != "" {
-		if color, err := ParseHexColor(currentConfig.CustomTheme.ProcessList); err == nil {
+	if effectiveCustomTheme() != nil && effectiveCustomTheme().ProcessList != "" {
+		if color, err := ParseHexColor(effectiveCustomTheme().ProcessList); err == nil {
 			titleColor = color
 		}
 	}
 	if titleColor == ui.ColorClear {
-		titleColor = GetThemeColorWithLightMode(currentConfig.Theme, IsLightMode)
+		titleColor = GetThemeColorWithLightMode(effectiveThemeName(), IsLightMode)
 	}
 	if isHtopMode() {
 		titleColor = htopPalette().user
@@ -118,28 +118,15 @@ func attemptKillProcess() {
 		return
 	}
 
-	var currentViewProcesses []ProcessMetrics
-
-	// If search criteria exists, use that (even if nil/empty), otherwise use full list
-	if searchText != "" {
-		if filteredProcesses == nil {
-			currentViewProcesses = []ProcessMetrics{}
-		} else {
-			currentViewProcesses = filteredProcesses
-		}
-	} else {
-		currentViewProcesses = lastProcesses
-	}
-
-	if len(currentViewProcesses) > 0 && processList.SelectedRow < len(currentViewProcesses)+1 {
-		if processList.SelectedRow > 0 {
-			processIndex := processList.SelectedRow - 1
-			if processIndex < len(currentViewProcesses) {
-				pid := currentViewProcesses[processIndex].PID
-				showKillModal(pid)
-			}
+	row := processList.SelectedRow - 1
+	if row >= 0 && row < len(visibleProcesses) {
+		p := visibleProcesses[row]
+		showKillModal(p.PID)
+		if p.BirthTime > 0 {
+			killBirthTime = p.BirthTime
 		}
 	}
+
 }
 
 func handleSearchToggle() {
@@ -187,6 +174,14 @@ func handleVerticalNavigation(e ui.Event) {
 }
 
 func handleColumnNavigation(e ui.Event) {
+	if isTop3Layout() {
+		if e.ID == "<Left>" {
+			cycleTopMetric(-1)
+		} else if e.ID == "<Right>" {
+			cycleTopMetric(1)
+		}
+		return
+	}
 	if isPortsLayoutActive() {
 		switch e.ID {
 		case "<Left>":
@@ -226,6 +221,9 @@ func handleColumnNavigation(e ui.Event) {
 }
 
 func handleSortToggle() {
+	if isTop3Layout() {
+		return
+	}
 	if isPortsLayoutActive() {
 		portSortReverse = !portSortReverse
 		updateProcessList()

@@ -91,7 +91,6 @@ import "C"
 
 import (
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -192,6 +191,9 @@ func applyOverlayConfig(sections string) {
 	copyToCCharBuf(unsafe.Pointer(&ccfg.label_fans), i18n.T("Overlay_Fans"), 32)
 	copyToCCharBuf(unsafe.Pointer(&ccfg.label_network), i18n.T("Overlay_Network"), 32)
 
+	if values, err := overlaySnapshotValues(strings.Split(collapsedStr, ","), strings.Split(expandedStr, ","), float64(ccfg.opacity)); err == nil {
+		nativeOverlayPreferences.record(values)
+	}
 	C.setOverlayConfig(&ccfg)
 }
 
@@ -404,15 +406,14 @@ func startOverlayProcess() error {
 	expandedStr := strings.Join(overlayCfg.ExpandedOrder, ",")
 
 	effectiveOpacity := overlayOpacity
-	opacityFlag := flag.Lookup("overlay-opacity")
-	cliSetOpacity := opacityFlag != nil && opacityFlag.Value.String() != opacityFlag.DefValue
+	cliSetOpacity := flagWasSet("overlay-opacity")
 	if overlayCfg.Opacity != nil && !cliSetOpacity {
 		// Use config opacity only if CLI flag wasn't explicitly provided
 		effectiveOpacity = *overlayCfg.Opacity
 	}
 
 	cmd.Env = append(os.Environ(),
-		"MACTOP_OVERLAY_SECTIONS="+overlaySections,
+		"MACTOP_OVERLAY_SECTIONS="+effectiveOverlaySections(overlayCfg),
 		fmt.Sprintf("MACTOP_OVERLAY_OPACITY=%.2f", effectiveOpacity),
 		"MACTOP_OVERLAY_COLLAPSED="+collapsedStr,
 		"MACTOP_OVERLAY_EXPANDED="+expandedStr,
@@ -489,4 +490,31 @@ func pushOverlayMetrics(sm SocMetrics, cpuMetrics CPUMetrics, gpuMetrics GPUMetr
 			stderrLogger.Printf("Failed to restart overlay worker: %v\n", restartErr)
 		}
 	}
+}
+
+func effectiveOverlaySections(c OverlayConfig) string {
+	if flagWasSet("overlay-sections") {
+		return overlaySections
+	}
+	return c.Sections
+}
+
+//export GoSaveOverlayConfig
+func GoSaveOverlayConfig(collapsed, expanded *C.char, opacity C.double) C.int {
+	if collapsed == nil || expanded == nil {
+		return 0
+	}
+	if err := saveOverlayPreferences(C.GoString(collapsed), C.GoString(expanded), float64(opacity)); err != nil {
+		stderrLogger.Printf("Overlay settings were not saved: %v", err)
+		return 0
+	}
+	return 1
+}
+
+func saveOverlayPreferences(collapsed, expanded string, opacity float64) error {
+	values, err := overlaySnapshotValues(strings.FieldsFunc(collapsed, func(r rune) bool { return r == ',' }), strings.FieldsFunc(expanded, func(r rune) bool { return r == ',' }), opacity)
+	if err != nil {
+		return err
+	}
+	return nativeOverlayPreferences.commit(values)
 }

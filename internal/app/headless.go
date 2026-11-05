@@ -204,7 +204,7 @@ func runHeadless(count int) {
 		return
 	}
 
-	ticker := time.NewTicker(time.Duration(updateInterval) * time.Millisecond)
+	ticker := time.NewTicker(time.Duration(getUpdateInterval()) * time.Millisecond)
 	defer ticker.Stop()
 
 	for {
@@ -325,7 +325,7 @@ func performHeadlessWarmup() *ThunderboltOutput {
 	tbInfo, _ := GetFormattedThunderboltInfo()
 	initDuration := time.Since(startInit)
 
-	initialDelay := time.Duration(updateInterval)*time.Millisecond - initDuration
+	initialDelay := time.Duration(getUpdateInterval())*time.Millisecond - initDuration
 	if initialDelay > 0 {
 		time.Sleep(initialDelay)
 	}
@@ -514,7 +514,7 @@ func getHeadlessNetworkLinks() HeadlessNetworkLinks {
 }
 
 func collectHeadlessData(tbInfo *ThunderboltOutput, sysInfo SystemInfo) HeadlessOutput {
-	m := normalizeSocMetricsPower(sampleSocMetrics(updateInterval))
+	m := normalizeSocMetricsPower(sampleSocMetrics(getUpdateInterval()))
 	mem := getMemoryMetrics()
 	netDisk := getNetDiskMetrics()
 	publishPrometheusNetDiskMetrics(netDisk)

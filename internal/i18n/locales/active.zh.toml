@@ -435,3 +435,52 @@ TUI_ModeMenuHtop = "1. New TUI (htop)"
 TUI_ModeMenuOriginal = "2. Original"
 TUI_ModeMenuNavigate = "Up/Down: choose   Enter: open"
 TUI_ModeMenuShortcuts = "1/2: open directly   q/Esc: exit"
+
+Settings_Language = "en"
+
+Settings_Title = " Settings · New TUI "
+
+Settings_NewTitle = " New TUI "
+
+Settings_Start = "1. Start"
+
+Settings_Open = "2. Settings"
+
+Settings_Back = "3. Back"
+
+Settings_Default = "Default"
+
+Settings_Command = "Show CLI command"
+
+Settings_Override = "Session override"
+
+Settings_Keys = "Tab:category Enter:edit ←/→:choose d:default F10:save Esc:cancel"
+
+Settings_ConfigColors = "Original colors will use config.json (source: config)."
+
+Settings_Imported = "theme.json copied to draft; F10 saves, Esc cancels."
+
+Settings_SaveError = "Settings were not saved"
+
+Settings_PIDGone = "PID is no longer running"
+
+Settings_Help = "F2: settings (New TUI) · Top 3: Left/Right chooses CPU, RES or GPU"
+
+Top3_Coverage = " · data %d/%d"
+
+Top3_Frozen = "frozen"
+
+Top3_NoData = "No valid data for this metric in the current sample."
+
+Settings_MenuKeys = "1/2/3: choose   q: exit   Esc: back"
+Settings_CategoryGeneral = "General"
+Settings_CategoryOriginal = "Original appearance"
+Settings_CategoryNewUI = "New TUI"
+Settings_CategoryProcesses = "Processes"
+Settings_CategoryColors = "New TUI colors"
+Settings_CategoryMenuBar = "Menu bar"
+Settings_CategoryOverlay = "Overlay"
+Settings_CategoryHeadless = "Headless output"
+Settings_CategoryServices = "Services"
+Settings_CategoryActions = "Actions and diagnostics"
+Settings_RootMenuKeys = "1: New TUI · 2: Original · q/Esc: exit"

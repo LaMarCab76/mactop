@@ -434,3 +434,52 @@ TUI_ModeMenuHtop = "1. Nueva TUI (htop)"
 TUI_ModeMenuOriginal = "2. Original"
 TUI_ModeMenuNavigate = "Arriba/Abajo: elegir   Enter: abrir"
 TUI_ModeMenuShortcuts = "1/2: abrir directamente   q/Esc: salir"
+
+Settings_Language = "es"
+
+Settings_Title = " Ajustes · Nueva TUI "
+
+Settings_NewTitle = " Nueva TUI "
+
+Settings_Start = "1. Iniciar"
+
+Settings_Open = "2. Ajustes"
+
+Settings_Back = "3. Volver"
+
+Settings_Default = "Predeterminado"
+
+Settings_Command = "Mostrar comando CLI"
+
+Settings_Override = "Override de sesión"
+
+Settings_Keys = "Tab:categoría ↵:editar ←/→:elegir d:default F10:guardar Esc:cancelar"
+
+Settings_ConfigColors = "Original usará config.json para colores (origen: config)."
+
+Settings_Imported = "theme.json copiado al borrador; F10 guarda, Esc cancela."
+
+Settings_SaveError = "No se guardaron los ajustes"
+
+Settings_PIDGone = "El PID ya no está en ejecución"
+
+Settings_Help = "F2: ajustes (Nueva TUI) · Top 3: ←/→ elige CPU, RES o GPU"
+
+Top3_Coverage = " · datos %d/%d"
+
+Top3_Frozen = "congelado"
+
+Top3_NoData = "Sin datos válidos de esta métrica en la muestra actual."
+
+Settings_MenuKeys = "1/2/3: elegir   q: salir   Esc: volver"
+Settings_CategoryGeneral = "General"
+Settings_CategoryOriginal = "Apariencia Original"
+Settings_CategoryNewUI = "Nueva TUI"
+Settings_CategoryProcesses = "Procesos"
+Settings_CategoryColors = "Colores Nueva TUI"
+Settings_CategoryMenuBar = "Barra de menú"
+Settings_CategoryOverlay = "Overlay"
+Settings_CategoryHeadless = "Salida headless"
+Settings_CategoryServices = "Servicios"
+Settings_CategoryActions = "Acciones y diagnósticos"
+Settings_RootMenuKeys = "1: Nueva TUI · 2: Original · q/Esc: salir"

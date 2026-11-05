@@ -356,6 +356,7 @@ int get_core_topology(core_info_t *cores, int max_cores) {
 typedef struct {
     int pid;
     uint64_t gpu_time_ns;  // accumulated GPU time in nanoseconds
+    int valid;
 } gpu_process_stat_t;
 
 // Extract PID from "IOUserClientCreator" string like "pid 682, WindowServer"
@@ -375,9 +376,10 @@ static int extract_pid_from_creator(CFStringRef creator) {
 }
 
 // Sum all accumulatedGPUTime from AppUsage array
-static uint64_t sum_gpu_time(CFArrayRef appUsage) {
+static uint64_t sum_gpu_time(CFArrayRef appUsage, int *valid) {
+ *valid=1;
     if (appUsage == NULL || CFGetTypeID(appUsage) != CFArrayGetTypeID()) {
-        return 0;
+        *valid=0;return 0;
     }
 
     uint64_t total = 0;
@@ -386,17 +388,16 @@ static uint64_t sum_gpu_time(CFArrayRef appUsage) {
     for (CFIndex i = 0; i < count; i++) {
         CFDictionaryRef entry = (CFDictionaryRef)CFArrayGetValueAtIndex(appUsage, i);
         if (entry == NULL || CFGetTypeID(entry) != CFDictionaryGetTypeID()) {
-            continue;
+            *valid=0;return 0;
         }
 
         CFNumberRef gpuTimeNum = (CFNumberRef)CFDictionaryGetValue(entry, CFSTR("accumulatedGPUTime"));
         if (gpuTimeNum != NULL && CFGetTypeID(gpuTimeNum) == CFNumberGetTypeID()) {
             int64_t gpuTime = 0;
-            CFNumberGetValue(gpuTimeNum, kCFNumberSInt64Type, &gpuTime);
-            if (gpuTime > 0) {
-                total += (uint64_t)gpuTime;
-            }
-        }
+            if(!CFNumberGetValue(gpuTimeNum, kCFNumberSInt64Type, &gpuTime)){*valid=0;return 0;}
+            if (gpuTime < 0 || UINT64_MAX-total<(uint64_t)gpuTime) { *valid=0; return 0; }
+            total += (uint64_t)gpuTime;
+        }else{*valid=0;return 0;}
     }
 
     return total;
@@ -404,69 +405,44 @@ static uint64_t sum_gpu_time(CFArrayRef appUsage) {
 
 // Query AGXDeviceUserClient for per-process GPU statistics
 // AGXDeviceUserClient objects are children of AGXAccelerator, not standalone services
-int get_gpu_process_stats(gpu_process_stat_t *stats, int max_stats) {
-    // Find the AGXAccelerator service
-    CFMutableDictionaryRef match = IOServiceMatching("AGXAccelerator");
-    io_service_t accelerator = IOServiceGetMatchingService(kIOMainPortDefault, match);
-    if (accelerator == 0) {
-        return 0;
+gpu_process_stat_t *get_gpu_process_stats(int *out_count) {
+ *out_count=-1;
+ io_service_t accelerator=IOServiceGetMatchingService(kIOMainPortDefault,IOServiceMatching("AGXAccelerator"));
+ if(!accelerator)return NULL;
+ io_iterator_t iter=0;
+ if(IORegistryEntryGetChildIterator(accelerator,kIOServicePlane,&iter)!=kIOReturnSuccess){IOObjectRelease(accelerator);return NULL;}
+ size_t capacity=256,count=0;
+ gpu_process_stat_t *stats=calloc(capacity,sizeof(*stats));
+ if(!stats){IOObjectRelease(iter);IOObjectRelease(accelerator);return NULL;}
+ io_registry_entry_t child;
+ int failed=0;
+ while((child=IOIteratorNext(iter))){
+  io_name_t name;
+  if(IOObjectGetClass(child,name)!=kIOReturnSuccess||strncmp(name,"AGXDeviceUserClient",19)!=0){IOObjectRelease(child);continue;}
+  CFMutableDictionaryRef props=NULL;
+  if(IORegistryEntryCreateCFProperties(child,&props,kCFAllocatorDefault,0)==kIOReturnSuccess&&props){
+   CFTypeRef creator=CFDictionaryGetValue(props,CFSTR("IOUserClientCreator"));
+   int pid=(creator&&CFGetTypeID(creator)==CFStringGetTypeID())?extract_pid_from_creator((CFStringRef)creator):-1;
+   CFTypeRef usage=CFDictionaryGetValue(props,CFSTR("AppUsage"));
+   if(pid>0){
+    int valid=usage&&CFGetTypeID(usage)==CFArrayGetTypeID();
+    uint64_t value=valid?sum_gpu_time((CFArrayRef)usage,&valid):0;
+    if(count==capacity){
+     size_t next=capacity*2;
+     gpu_process_stat_t *grown=realloc(stats,next*sizeof(*stats));
+     if(!grown){failed=1;CFRelease(props);IOObjectRelease(child);break;}
+     stats=grown;capacity=next;
     }
-
-    // Get child iterator to find AGXDeviceUserClient objects
-    io_iterator_t childIter;
-    kern_return_t kr = IORegistryEntryGetChildIterator(accelerator, kIOServicePlane, &childIter);
-    if (kr != kIOReturnSuccess) {
-        IOObjectRelease(accelerator);
-        return 0;
-    }
-
-    int count = 0;
-    io_registry_entry_t child;
-
-    while ((child = IOIteratorNext(childIter)) && count < max_stats) {
-        // Verify this is an AGXDeviceUserClient
-        io_name_t className;
-        IOObjectGetClass(child, className);
-        if (strncmp(className, "AGXDeviceUserClient", 19) != 0) {
-            IOObjectRelease(child);
-            continue;
-        }
-
-        CFMutableDictionaryRef properties = NULL;
-        if (IORegistryEntryCreateCFProperties(child, &properties, kCFAllocatorDefault, 0) == kIOReturnSuccess && properties) {
-            // Get PID from IOUserClientCreator
-            CFStringRef creator = (CFStringRef)CFDictionaryGetValue(properties, CFSTR("IOUserClientCreator"));
-            int pid = extract_pid_from_creator(creator);
-
-            if (pid > 0) {
-                // Get GPU time from AppUsage
-                CFArrayRef appUsage = (CFArrayRef)CFDictionaryGetValue(properties, CFSTR("AppUsage"));
-                uint64_t gpuTime = sum_gpu_time(appUsage);
-
-                // Check if we already have this PID (processes can have multiple GPU clients)
-                int found = 0;
-                for (int i = 0; i < count; i++) {
-                    if (stats[i].pid == pid) {
-                        stats[i].gpu_time_ns += gpuTime;
-                        found = 1;
-                        break;
-                    }
-                }
-
-                if (!found && gpuTime > 0) {
-                    stats[count].pid = pid;
-                    stats[count].gpu_time_ns = gpuTime;
-                    count++;
-                }
-            }
-            CFRelease(properties);
-        }
-        IOObjectRelease(child);
-    }
-    IOObjectRelease(childIter);
-    IOObjectRelease(accelerator);
-
-    return count;
+    stats[count].pid=pid;stats[count].gpu_time_ns=value;stats[count].valid=valid;count++;
+   }
+   CFRelease(props);
+  }
+  IOObjectRelease(child);
+ }
+ IOObjectRelease(iter);IOObjectRelease(accelerator);
+ if(failed){free(stats);return NULL;}
+ *out_count=(int)count;
+ return stats;
 }
 
 int get_gpu_core_count() {
@@ -1335,24 +1311,23 @@ func BuildCoreLabels() ([]string, int, int, int, []int) {
 type GPUProcessStat struct {
 	PID       int
 	GPUTimeNs uint64 // accumulated GPU time in nanoseconds
+	Valid     bool
 }
 
 // GetGPUProcessStats returns per-process GPU statistics from IOKit AGXDeviceUserClient
 func GetGPUProcessStats() map[int]uint64 {
-	maxStats := 256
-	stats := make([]C.gpu_process_stat_t, maxStats)
-
-	count := C.get_gpu_process_stats(&stats[0], C.int(maxStats))
-	if count <= 0 {
+	var count C.int
+	pointer := C.get_gpu_process_stats(&count)
+	if pointer == nil || count < 0 {
 		return nil
 	}
-
-	result := make(map[int]uint64)
-	for i := 0; i < int(count); i++ {
-		pid := int(stats[i].pid)
-		gpuTime := uint64(stats[i].gpu_time_ns)
-		result[pid] = gpuTime
+	defer C.free(unsafe.Pointer(pointer))
+	clients := make([]GPUProcessStat, int(count))
+	stats := unsafe.Slice(pointer, int(count))
+	for i, stat := range stats {
+		clients[i] = GPUProcessStat{PID: int(stat.pid), GPUTimeNs: uint64(stat.gpu_time_ns), Valid: stat.valid != 0}
 	}
+	result := aggregateGPUClients(clients)
 
 	return result
 }

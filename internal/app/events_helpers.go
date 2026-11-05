@@ -29,74 +29,31 @@ func noteFanWrites(errs ...error) {
 	fanControlWriteFailed = false
 }
 
-func toggleInfoLayout() {
+func toggleInfoLayout() { toggleTemporaryLayout(LayoutInfo) }
+func toggleFanLayout()  { toggleTemporaryLayout(LayoutFan) }
+func toggleTemporaryLayout(target string) {
 	renderMutex.Lock()
-	if currentConfig.DefaultLayout == LayoutInfo {
-		if lastActiveLayout != "" && lastActiveLayout != LayoutInfo {
-			currentConfig.DefaultLayout = lastActiveLayout
-		} else {
-			currentConfig.DefaultLayout = LayoutDefault
+	defer renderMutex.Unlock()
+	if effectiveLayout() == target {
+		runtimeLayout = lastActiveLayout
+		if runtimeLayout == "" {
+			runtimeLayout = preferredLayout()
 		}
 		temporaryLayout = false
-		for i, layout := range layoutOrder {
-			if layout == currentConfig.DefaultLayout {
-				currentLayoutNum = i
-				break
-			}
-		}
 	} else {
 		if !temporaryLayout {
-			lastActiveLayout = currentConfig.DefaultLayout
+			lastActiveLayout = effectiveLayout()
 		}
-		temporaryLayout = true
-		currentConfig.DefaultLayout = LayoutInfo
-		for i, layout := range layoutOrder {
-			if layout == LayoutInfo {
-				currentLayoutNum = i
-				break
-			}
-		}
-	}
-	applyLayout(currentConfig.DefaultLayout)
-	w, h := ui.TerminalDimensions()
-	drawScreen(w, h)
-	renderMutex.Unlock()
-}
-
-func toggleFanLayout() {
-	renderMutex.Lock()
-	if currentConfig.DefaultLayout == LayoutFan {
-		if lastActiveLayout != "" && lastActiveLayout != LayoutFan {
-			currentConfig.DefaultLayout = lastActiveLayout
-		} else {
-			currentConfig.DefaultLayout = LayoutDefault
-		}
-		temporaryLayout = false
-		for i, layout := range layoutOrder {
-			if layout == currentConfig.DefaultLayout {
-				currentLayoutNum = i
-				break
-			}
-		}
-	} else {
-		if !temporaryLayout {
-			lastActiveLayout = currentConfig.DefaultLayout
-		}
-		temporaryLayout = true
-		currentConfig.DefaultLayout = LayoutFan
+		runtimeLayout, temporaryLayout = target, true
 		infoScrollOffset = 0
-		for i, layout := range layoutOrder {
-			if layout == LayoutFan {
-				currentLayoutNum = i
-				break
-			}
-		}
 	}
-	applyLayout(currentConfig.DefaultLayout)
+	updateLayoutNumber()
+	if !showHelp {
+		applyLayout(effectiveLayout())
+	}
 	updateInfoUI()
-	w, h := ui.TerminalDimensions()
-	drawScreen(w, h)
-	renderMutex.Unlock()
+	updateProcessList()
+	drawScreen(GetCachedTerminalDimensions())
 }
 
 // cleanupFanControl resets fans to auto mode on application exit
@@ -264,6 +221,18 @@ func handleFanResetAuto() {
 
 func handleThemeCycle(step int) {
 	renderMutex.Lock()
+	if isHtopMode() {
+		activeSettings = newSettingsEditor(false)
+		for i, c := range settingsCategories() {
+			if c == "Colores Nueva TUI" {
+				activeSettings.category = i
+				break
+			}
+		}
+		drawScreen(GetCachedTerminalDimensions())
+		renderMutex.Unlock()
+		return
+	}
 	w, h := ui.TerminalDimensions()
 	updateLayout(w, h)
 	cycleTheme(step)

@@ -290,14 +290,14 @@ func buildInfoText() string {
 
 func getThemeColor() string {
 	themeColor := "green"
-	if currentConfig.Theme != "" {
-		if currentConfig.Theme == "1977" {
+	if effectiveThemeName() != "" {
+		if effectiveThemeName() == "1977" {
 			themeColor = "green"
-		} else if IsPaletteTheme(currentConfig.Theme) {
-			themeColor = GetPaletteHex(currentConfig.Theme, "Primary")
+		} else if IsPaletteTheme(effectiveThemeName()) {
+			themeColor = GetPaletteHex(effectiveThemeName(), "Primary")
 		} else {
 			// Use resolveThemeColorString for all colors (handles hex codes)
-			themeColor = resolveThemeColorString(currentConfig.Theme)
+			themeColor = resolveThemeColorString(effectiveThemeName())
 		}
 	}
 	if IsLightMode && themeColor == "white" {

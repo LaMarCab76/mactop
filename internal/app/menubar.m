@@ -72,6 +72,7 @@ typedef struct {
   char ane_color[8];
   char mem_color[8];
   char label_color[8];
+  char bar_order[64];
 } menubar_config_t;
 
 // Go callback for persisting settings
@@ -922,22 +923,14 @@ static NSImage *drawStatusBarImage(double cpu, double gpu, double ane,
   CGFloat barY = (h - barH) / 2.0;
   CGFloat x = 2;
 
-  if (g_config.show_cpu) {
-    drawHBar(@"C", cpu, cpuColor(), x, barY, barW, barH, g_config.show_percent);
-    x += sectionW + gap;
-  }
-  if (g_config.show_gpu) {
-    drawHBar(@"G", gpu, gpuColor(), x, barY, barW, barH, g_config.show_percent);
-    x += sectionW + gap;
-  }
-  if (g_config.show_ane) {
-    drawHBar(@"A", ane, aneColor(), x, barY, barW, barH, g_config.show_percent);
-    x += sectionW + gap;
-  }
-  if (g_config.show_memory) {
-    drawHBar(@"M", memPct, memColor(), x, barY, barW, barH,
-             g_config.show_percent);
-    x += sectionW + gap;
+  NSString *orderText = g_config.bar_order[0] ? [NSString stringWithUTF8String:g_config.bar_order] : @"cpu,gpu,ane,memory";
+  for (NSString *item in [orderText componentsSeparatedByString:@","]) {
+    BOOL show = NO; NSString *label = @""; double value = 0; NSColor *color = nil;
+    if ([item isEqualToString:@"cpu"]) { show=g_config.show_cpu; label=@"C"; value=cpu; color=cpuColor(); }
+    else if ([item isEqualToString:@"gpu"]) { show=g_config.show_gpu; label=@"G"; value=gpu; color=gpuColor(); }
+    else if ([item isEqualToString:@"ane"]) { show=g_config.show_ane; label=@"A"; value=ane; color=aneColor(); }
+    else if ([item isEqualToString:@"memory"]) { show=g_config.show_memory; label=@"M"; value=memPct; color=memColor(); }
+    if (show) { drawHBar(label,value,color,x,barY,barW,barH,g_config.show_percent); x+=sectionW+gap; }
   }
 
   // Draw Wattage
@@ -1038,17 +1031,19 @@ static NSString *formatThroughput(double bps) {
 }
 
 static void persistConfig(void) {
-  dispatch_async(
-      dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        GoSaveMenuBarConfig(
-            g_config.status_bar_width, g_config.status_bar_height,
-            g_config.sparkline_width, g_config.sparkline_height,
-            g_config.show_cpu, g_config.show_gpu, g_config.show_ane,
-            g_config.show_memory, g_config.show_power, g_config.show_percent,
-            g_config.font_size, g_config.power_font_size, g_config.cpu_color,
-            g_config.gpu_color, g_config.ane_color, g_config.mem_color,
-            g_config.label_color);
-      });
+  // Capture on the Cocoa thread; serialize callbacks in event order.
+  menubar_config_t snapshot=g_config;
+  static dispatch_queue_t preferenceQueue;
+  static dispatch_once_t preferenceQueueOnce;
+  dispatch_once(&preferenceQueueOnce, ^{preferenceQueue=dispatch_queue_create("macTop.menubar.preferences",DISPATCH_QUEUE_SERIAL);});
+  dispatch_async(preferenceQueue, ^{
+    GoSaveMenuBarConfig(snapshot.status_bar_width,snapshot.status_bar_height,
+      snapshot.sparkline_width,snapshot.sparkline_height,snapshot.show_cpu,snapshot.show_gpu,
+      snapshot.show_ane,snapshot.show_memory,snapshot.show_power,snapshot.show_percent,
+      snapshot.font_size,snapshot.power_font_size,snapshot.cpu_color,snapshot.gpu_color,
+      snapshot.ane_color,snapshot.mem_color,snapshot.label_color);
+  });
+
 }
 
 // refreshAllMenuColors walks the dropdown menu and re-applies textColors to

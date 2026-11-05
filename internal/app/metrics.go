@@ -561,7 +561,7 @@ func collectNetDiskMetrics(done chan struct{}, netdiskMetricsChan chan NetDiskMe
 		}
 
 		elapsed := time.Since(start)
-		sleepTime := time.Duration(updateInterval)*time.Millisecond - elapsed
+		sleepTime := time.Duration(getUpdateInterval())*time.Millisecond - elapsed
 		if sleepTime > 0 {
 			select {
 			case <-time.After(sleepTime):
@@ -608,7 +608,7 @@ func collectMetrics(done chan struct{}, cpumetricsChan chan CPUMetrics, gpumetri
 	for {
 		start := time.Now()
 
-		sampleDuration := max(updateInterval, 100)
+		sampleDuration := max(getUpdateInterval(), 100)
 
 		m := normalizeSocMetricsPower(sampleSocMetrics(sampleDuration / 2))
 
@@ -672,7 +672,7 @@ func collectMetrics(done chan struct{}, cpumetricsChan chan CPUMetrics, gpumetri
 		}
 
 		elapsed := time.Since(start)
-		sleepTime := time.Duration(updateInterval)*time.Millisecond - elapsed
+		sleepTime := time.Duration(getUpdateInterval())*time.Millisecond - elapsed
 		if sleepTime > 0 {
 			select {
 			case <-time.After(sleepTime):
@@ -712,7 +712,7 @@ func collectProcessMetrics(done chan struct{}, processMetricsChan chan []Process
 			sysPct := lastGPUMetrics.ActivePercent
 			renderMutex.Unlock()
 
-			if processes, err := getProcessList(sysPct); err == nil {
+			if processes, err := getProcessSnapshot(sysPct); err == nil {
 				processMetricsChan <- processes
 			} else {
 				stderrLogger.Printf("Error getting process list: %v\n", err)

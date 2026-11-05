@@ -1,8 +1,6 @@
 package app
 
 import (
-	"time"
-
 	ui "github.com/metaspartan/gotui/v5"
 )
 
@@ -116,7 +114,7 @@ func updateLayout(w, h int) {
 		// gotui.Grid.Set appends entries, so rebuild rather than accumulating
 		// old layouts underneath the new one on every resize.
 		grid = ui.NewGrid()
-		setLayoutGrid(currentConfig.DefaultLayout)
+		setLayoutGrid(effectiveLayout())
 	}
 	if w > 2 && h > 2 {
 		grid.SetRect(1, 1, w-1, h-1)
@@ -132,6 +130,14 @@ func drawScreen(w, h int) {
 }
 
 func renderContent(w, h int) {
+	if activeSettings != nil {
+		activeSettings.SetRect(0, 0, w, h)
+		ui.Render(activeSettings)
+		return
+	}
+	if !isHtopMode() {
+		applyEffectiveComponentColors()
+	}
 	renderWithUIMode(func() {
 		items := []ui.Drawable{}
 		if isHtopMode() {
@@ -245,25 +251,15 @@ func handleIntervalKeys(key string) {
 
 	if delta != 0 {
 		renderMutex.Lock()
-		updateInterval += delta
-		if updateInterval < 100 {
-			updateInterval = 100
-		}
-		if updateInterval > 5000 {
-			updateInterval = 5000
-		}
-		ticker.Reset(time.Duration(updateInterval) * time.Millisecond)
-		if partyMode && partyTicker != nil {
-			partyTicker.Reset(time.Duration(updateInterval/2) * time.Millisecond)
-		}
-
+		defer renderMutex.Unlock()
+		ms := max(100, min(5000, getUpdateInterval()+delta))
+		_ = setUpdateInterval(ms)
+		currentConfig.Interval = ms
+		saveConfig()
 		updateHelpText()
 		updateModelText()
-		updateIntervalText()
-		currentConfig.Interval = updateInterval
-		saveConfig()
-		renderMutex.Unlock()
 	}
+
 }
 
 func handleKeyboardEvent(e ui.Event, done chan struct{}) {
@@ -271,6 +267,20 @@ func handleKeyboardEvent(e ui.Event, done chan struct{}) {
 
 	// Delegate to process list events (handles search/modal/navigation)
 	renderMutex.Lock()
+	if activeSettings != nil {
+		close, quit := activeSettings.key(key)
+		if close {
+			activeSettings = nil
+		}
+		if !quit {
+			drawScreen(GetCachedTerminalDimensions())
+		}
+		renderMutex.Unlock()
+		if quit {
+			shutdownAndExit(true)
+		}
+		return
+	}
 
 	if showHelp {
 		switch key {
@@ -300,6 +310,12 @@ func handleKeyboardEvent(e ui.Event, done chan struct{}) {
 		return
 	}
 
+	if key == "<F2>" && isHtopMode() {
+		activeSettings = newSettingsEditor(false)
+		drawScreen(GetCachedTerminalDimensions())
+		renderMutex.Unlock()
+		return
+	}
 	ui.Clear()
 	w, h := GetCachedTerminalDimensions()
 	drawScreen(w, h)
@@ -328,7 +344,7 @@ func handleKeyboardEvent(e ui.Event, done chan struct{}) {
 }
 
 func handleFanControlKeys(key string) bool {
-	if !fanControl || currentConfig.DefaultLayout != LayoutFan {
+	if !fanControl || effectiveLayout() != LayoutFan {
 		return false
 	}
 	switch key {
@@ -349,7 +365,7 @@ func handleFanControlKeys(key string) bool {
 }
 
 func handleInfoFanScroll(direction int) {
-	if currentConfig.DefaultLayout != LayoutInfo && currentConfig.DefaultLayout != LayoutFan {
+	if effectiveLayout() != LayoutInfo && effectiveLayout() != LayoutFan {
 		return
 	}
 	renderMutex.Lock()
@@ -365,6 +381,12 @@ func handleInfoFanScroll(direction int) {
 
 func handleGenericMouseEvent(e ui.Event) {
 	renderMutex.Lock()
+	if activeSettings != nil {
+		activeSettings.key(e.ID)
+		drawScreen(GetCachedTerminalDimensions())
+		renderMutex.Unlock()
+		return
+	}
 
 	if showHelp {
 		switch e.ID {
@@ -383,7 +405,7 @@ func handleGenericMouseEvent(e ui.Event) {
 	}
 
 	// Handle mouse wheel scrolling in Info or Fan layout
-	if currentConfig.DefaultLayout == LayoutInfo || currentConfig.DefaultLayout == LayoutFan {
+	if effectiveLayout() == LayoutInfo || effectiveLayout() == LayoutFan {
 		switch e.ID {
 		case "<MouseWheelUp>":
 			if infoScrollOffset > 0 {

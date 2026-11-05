@@ -38,6 +38,9 @@ func modeTestUI(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	i18n.Init("en")
+	oldRuntimeInterval := runtimeInterval.Load()
+	runtimeInterval.Store(1000)
+	t.Cleanup(func() { runtimeInterval.Store(oldRuntimeInterval) })
 	var restore []func()
 	t.Cleanup(func() {
 		saveConfigFlush()
@@ -52,6 +55,15 @@ func modeTestUI(t *testing.T) {
 	t.Cleanup(backend.Close)
 	replaceUIValue(&restore, &ui.DefaultBackend, backend)
 	replaceUIValue(&restore, &currentConfig, AppConfig{DefaultLayout: LayoutDefault, Theme: "green"})
+	replaceUIValue(&restore, &runtimeLayout, "")
+	replaceUIValue(&restore, &previousStableLayout, "")
+	replaceUIValue(&restore, &modeLayouts, map[string]modeLayoutState{})
+	replaceUIValue(&restore, &activeOriginalAppearance, (*originalAppearance)(nil))
+	replaceUIValue(&restore, &partyTheme, "")
+	replaceUIValue(&restore, &activeSettings, (*settingsEditor)(nil))
+	replaceUIValue(&restore, &visibleProcesses, ([]ProcessMetrics)(nil))
+	replaceUIValue(&restore, &meterValues, map[*w.Gauge]float64{})
+
 	replaceUIValue(&restore, &activeUIMode, UIModeOriginal)
 	replaceUIValue(&restore, &showHelp, false)
 	replaceUIValue(&restore, &isFrozen, false)
@@ -141,17 +153,30 @@ func TestUIModePreservesHelpAndTemporaryLayouts(t *testing.T) {
 			t.Fatalf("stale footer after help mode switch to %s: %q", mode, mainBlock.TitleBottomLeft)
 		}
 	}
+	showHelp = false
+	setUIMode(UIModeOriginal)
+	currentConfig.DefaultLayout = LayoutAlternative
+	runtimeLayout = LayoutAlternative
 	for _, layout := range []string{LayoutInfo, LayoutFan} {
-		currentConfig.DefaultLayout = layout
-		temporaryLayout = true
-		setUIMode(UIModeOriginal)
+		toggleTemporaryLayout(layout)
+		if effectiveLayout() != layout || !temporaryLayout {
+			t.Fatal("temporary layout did not open")
+		}
+		saveConfig()
 		if saved := readModeConfig(t); saved.DefaultLayout != LayoutAlternative {
-			t.Fatalf("temporary layout %s was persisted: %+v", layout, saved)
+			t.Fatalf("temporary layout persisted: %+v", saved)
 		}
-		if currentConfig.DefaultLayout != layout {
-			t.Fatal("visible temporary layout changed")
+		setUIMode(UIModeHtop)
+		if effectiveLayout() != LayoutDefault {
+			t.Fatal("Original temporary layout leaked into htop")
 		}
+		setUIMode(UIModeOriginal)
+		if effectiveLayout() != layout || !temporaryLayout {
+			t.Fatal("mode lost temporary return state")
+		}
+		toggleTemporaryLayout(layout)
 	}
+
 }
 
 func TestUIModeSavesStableLayoutAfterInfoFanSequence(t *testing.T) {
@@ -170,10 +195,12 @@ func TestUIModeSavesStableLayoutAfterInfoFanSequence(t *testing.T) {
 			if saved := readModeConfig(t); saved.DefaultLayout != LayoutAlternative || saved.UIMode != UIModeHtop {
 				t.Fatalf("temporary view leaked into saved config: %+v", saved)
 			}
+			// Return to the source mode before closing its temporary view.
+			setUIMode(UIModeOriginal)
 			// Toggling the active temporary view returns directly to the stable layout.
 			handleKeyboardEvent(ui.Event{ID: keys[len(keys)-1]}, done)
-			if currentConfig.DefaultLayout != LayoutAlternative {
-				t.Fatalf("return layout = %q", currentConfig.DefaultLayout)
+			if effectiveLayout() != LayoutAlternative {
+				t.Fatalf("return layout = %q", effectiveLayout())
 			}
 		})
 	}
@@ -206,8 +233,7 @@ func TestUIModeKeepsFanSelectedAsPermanentLayout(t *testing.T) {
 	if saved := readModeConfig(t); saved.DefaultLayout != LayoutFan {
 		t.Fatalf("Info lost permanent Fan: %+v", saved)
 	}
-	toggleInfoLayout()
-	if currentConfig.DefaultLayout != LayoutFan || temporaryLayout {
+	if effectiveLayout() != LayoutFan || temporaryLayout {
 		t.Fatal("Info did not return to permanent Fan")
 	}
 }
@@ -223,7 +249,7 @@ func TestUIModeRemembersTemporaryViewAcrossDirectLayoutSwitch(t *testing.T) {
 	}
 	switchToLayout(LayoutPorts)
 	saveConfig()
-	if currentConfig.DefaultLayout != LayoutInfo || !temporaryLayout {
+	if effectiveLayout() != LayoutInfo || !temporaryLayout {
 		t.Fatal("direct shortcut lost temporary return state")
 	}
 	if saved := readModeConfig(t); saved.DefaultLayout != LayoutAlternative {
@@ -256,7 +282,7 @@ func TestHtopStylesAreReversibleAndPartyPauses(t *testing.T) {
 	custom := &CustomThemeConfig{CPU: "#123456", ProcessList: "#abcdef"}
 	currentConfig.CustomTheme = custom
 	activeUIMode = UIModeHtop
-	cpuGauge.BarColor, gpuGauge.BarColor = ui.ColorPink, ui.ColorOrange
+	applyResolvedOriginalAppearance()
 	memoryHistoryChart.LineColors = []ui.Color{ui.ColorPink, ui.ColorOrange}
 	snapshot := func() []any {
 		return []any{cpuGauge.BarColor, cpuGauge.BorderStyle, cpuGauge.TitleStyle, cpuGauge.LabelStyle,
@@ -364,16 +390,18 @@ func TestHtopPaletteUsesExplicitBackgroundAndHeaderContrast(t *testing.T) {
 	activeUIMode = UIModeHtop
 	for _, tc := range []struct {
 		light  bool
-		bg     ui.Color
+		bg     string
 		text   ui.Color
 		header string
 	}{
-		{false, ui.ColorClear, ui.ColorWhite, "black"},
-		{true, ui.ColorClear, ui.ColorBlack, "white"},
-		{false, ui.ColorWhite, ui.ColorBlack, "white"},
-		{true, ui.ColorBlack, ui.ColorWhite, "black"},
+		{false, "", ui.ColorWhite, "black"},
+		{true, "", ui.ColorWhite, "black"},
+		{true, "clear", ui.ColorBlack, "white"},
+		{false, "white", ui.ColorBlack, "white"},
+		{true, "black", ui.ColorWhite, "black"},
 	} {
-		IsLightMode, CurrentBgColor = tc.light, tc.bg
+		IsLightMode = tc.light
+		currentConfig.Htop = &HtopConfig{Background: tc.bg}
 		_, header := resolveProcessThemeColor()
 		if htopPalette().text != tc.text || header != tc.header {
 			t.Fatalf("light=%v bg=%v: text=%v header=%s", tc.light, tc.bg, htopPalette().text, header)

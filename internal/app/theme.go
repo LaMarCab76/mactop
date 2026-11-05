@@ -1,12 +1,10 @@
 package app
 
 import (
-	"fmt"
 	"slices"
 
 	ui "github.com/metaspartan/gotui/v5"
 	w "github.com/metaspartan/gotui/v5/widgets"
-	"github.com/metaspartan/mactop/v2/internal/i18n"
 )
 
 // themeOrder defines the order themes cycle through with 'c' key
@@ -252,7 +250,7 @@ func applyCustomGaugeColors(theme *CustomThemeConfig, fgColor ui.Color) {
 // the multi-line history charts (styleStepChart forces a single color).
 func applyMultiSeriesChartColors(theme *CustomThemeConfig, fgColor ui.Color) {
 	if memoryHistoryChart != nil {
-		if currentConfig.DefaultLayout == LayoutHistorySoC {
+		if effectiveLayout() == LayoutHistorySoC {
 			memoryHistoryChart.LineColors = []ui.Color{ui.ColorOrange, ui.ColorMagenta}
 		} else {
 			memColor := resolveCustomColor(theme.Memory, fgColor)
@@ -260,9 +258,9 @@ func applyMultiSeriesChartColors(theme *CustomThemeConfig, fgColor ui.Color) {
 		}
 	}
 	if bandwidthHistoryChart != nil {
-		if currentConfig.DefaultLayout != LayoutHistorySoC {
+		if effectiveLayout() != LayoutHistorySoC {
 			bwColor := resolveCustomColor(theme.Bandwidth, fgColor)
-			if bwColor == fgColor {
+			if theme.Bandwidth == "" {
 				bwColor = resolveCustomColor(theme.Memory, fgColor)
 			}
 			bandwidthHistoryChart.LineColors = []ui.Color{bwColor, ui.ColorYellow}
@@ -299,12 +297,15 @@ func applyCustomWidgetColors(theme *CustomThemeConfig, fgColor ui.Color) {
 	styleStepChart(gpuHistoryChart, gpuColor)
 	styleStepChart(powerHistoryChart, powerColor)
 	styleStepChart(memoryHistoryChart, resolveCustomColor(theme.Memory, fgColor))
-	styleStepChart(memBWHistoryChart, resolveCustomColor(theme.Memory, fgColor))
-	styleStepChart(memoryPressureHistoryChart, resolveCustomColor(theme.Memory, fgColor))
+	memColor := theme.Bandwidth
+	if memColor == "" {
+		memColor = theme.Memory
+	}
+	styleStepChart(memBWHistoryChart, resolveCustomColor(memColor, fgColor))
 	styleStepChart(cpuHistoryChart, resolveCustomColor(theme.CPU, fgColor))
 	styleStepChart(aneHistoryChart, resolveCustomColor(theme.ANE, fgColor))
 	bwColor := resolveCustomColor(theme.Bandwidth, fgColor)
-	if bwColor == fgColor {
+	if theme.Bandwidth == "" {
 		bwColor = resolveCustomColor(theme.Memory, fgColor)
 	}
 	styleStepChart(bandwidthHistoryChart, bwColor)
@@ -320,8 +321,6 @@ func applyCustomWidgetColors(theme *CustomThemeConfig, fgColor ui.Color) {
 	styleParagraph(infoParagraph, fgColor) // info box uses foreground directly
 	styleParagraph(helpText, fgColor)
 	styleParagraph(modelText, resolveCustomColor(theme.SystemInfo, fgColor))
-	styleParagraph(memoryPressurePanel, resolveCustomColor(theme.Memory, fgColor))
-	styleGauge(memoryPressureGauge, resolveCustomColor(theme.Memory, fgColor), SecondaryTextColor)
 
 	// Process list (needs special selected-style contrast logic)
 	if processList != nil {
@@ -542,7 +541,7 @@ func applyDraculaFullTheme(palette *DraculaPalette, lightMode bool) {
 
 func applyTheme(colorName string, lightMode bool) {
 	color, resolvedName := resolveThemeColor(colorName)
-	currentConfig.Theme = resolvedName
+	currentColorName = resolvedName
 	color = setLightModeColors(lightMode, color)
 	setGlobalTheme(color)
 
@@ -634,32 +633,32 @@ func GetProcessTextColor(isCurrentUser bool) string {
 	}
 	if isCurrentUser {
 		// Prioritize custom ProcessList color if valid
-		if currentConfig.CustomTheme != nil && currentConfig.CustomTheme.ProcessList != "" {
-			if IsHexColor(currentConfig.CustomTheme.ProcessList) {
-				return currentConfig.CustomTheme.ProcessList
+		if effectiveCustomTheme() != nil && effectiveCustomTheme().ProcessList != "" {
+			if IsHexColor(effectiveCustomTheme().ProcessList) {
+				return effectiveCustomTheme().ProcessList
 			}
 		}
 
 		if IsLightMode {
-			color := GetThemeColorWithLightMode(currentConfig.Theme, true)
+			color := GetThemeColorWithLightMode(effectiveThemeName(), true)
 			if color == ui.NewRGBColor(2, 2, 2) {
 				return "#020202"
 			}
-			if IsPaletteTheme(currentConfig.Theme) {
-				return GetPaletteHex(currentConfig.Theme, "Text")
+			if IsPaletteTheme(effectiveThemeName()) {
+				return GetPaletteHex(effectiveThemeName(), "Text")
 			}
-			return resolveThemeColorString(currentConfig.Theme)
+			return resolveThemeColorString(effectiveThemeName())
 		}
 
-		if IsPaletteTheme(currentConfig.Theme) {
-			return GetPaletteHex(currentConfig.Theme, "Primary")
+		if IsPaletteTheme(effectiveThemeName()) {
+			return GetPaletteHex(effectiveThemeName(), "Primary")
 		}
-		return resolveThemeColorString(currentConfig.Theme)
+		return resolveThemeColorString(effectiveThemeName())
 	}
 	// Non-current user processes
-	if currentConfig.CustomTheme != nil && currentConfig.CustomTheme.ProcessListDim != "" {
-		if IsHexColor(currentConfig.CustomTheme.ProcessListDim) {
-			return currentConfig.CustomTheme.ProcessListDim
+	if effectiveCustomTheme() != nil && effectiveCustomTheme().ProcessListDim != "" {
+		if IsHexColor(effectiveCustomTheme().ProcessListDim) {
+			return effectiveCustomTheme().ProcessListDim
 		}
 	}
 	if IsLightMode {
@@ -669,37 +668,24 @@ func GetProcessTextColor(isCurrentUser bool) string {
 }
 
 func cycleTheme(step int) {
-	currentIndex := 0
+	index := 0
 	for i, name := range themeOrder {
-		if name == currentConfig.Theme {
-			currentIndex = i
+		if name == effectiveThemeName() {
+			index = i
 			break
 		}
 	}
-	n := len(themeOrder)
-	nextIndex := ((currentIndex+step)%n + n) % n
-	currentColorName = themeOrder[nextIndex]
-
-	// When cycling themes, clear the custom theme configuration to prevent
-	// lingering custom colors from overriding the selected preset theme.
-	currentConfig.CustomTheme = nil
-
-	applyTheme(themeOrder[nextIndex], IsLightMode)
-	saveConfig()
-
-	updateInfoUI()
-
-	if mainBlock != nil {
-		displayColorName := currentColorName
-		if IsLightMode && currentColorName == "white" {
-			displayColorName = "black"
-		}
-		mainBlock.TitleBottomLeft = fmt.Sprintf(i18n.T("TUI_LayoutInfo"), currentLayoutNum+1, totalLayouts, displayColorName)
-		if isHtopMode() {
-			width, _ := GetCachedTerminalDimensions()
-			updateLayoutFooter(width)
-		}
+	name := themeOrder[((index+step)%len(themeOrder)+len(themeOrder))%len(themeOrder)]
+	currentConfig.Theme, currentConfig.ThemeSource = name, "config"
+	if currentConfig.CustomTheme != nil {
+		legacy := currentConfig.CustomTheme
+		currentConfig.CustomTheme = &CustomThemeConfig{Foreground: legacy.Foreground, Background: legacy.Background}
 	}
+	partyTheme = ""
+	applyResolvedOriginalAppearance()
+	saveConfig()
+	updateInfoUI()
+	updateLayoutFooter(func() int { w, _ := GetCachedTerminalDimensions(); return w }())
 }
 
 // applyInitialBackground applies the saved background from config on startup
@@ -720,11 +706,29 @@ func applyInitialBackground() {
 
 // cycleBackground cycles through background colors. Positive step advances, negative reverses.
 func cycleBackground(step int) {
-	n := len(bgColorOrder)
-	currentBgIndex = ((currentBgIndex+step)%n + n) % n
-	bgName := bgColorOrder[currentBgIndex]
-	applyBackground(bgName)
-	currentConfig.Background = bgName
+	name := currentConfig.Background
+	if isHtopMode() {
+		name = htopConfig().Background
+	}
+	index := 0
+	for i, n := range bgColorOrder {
+		if n == name {
+			index = i
+			break
+		}
+	}
+	currentBgIndex = ((index+step)%len(bgColorOrder) + len(bgColorOrder)) % len(bgColorOrder)
+	name = bgColorOrder[currentBgIndex]
+	if isHtopMode() {
+		if currentConfig.Htop == nil {
+			currentConfig.Htop = &HtopConfig{}
+		}
+		currentConfig.Htop.Background = name
+	} else {
+		currentConfig.Background, currentConfig.ThemeSource = name, "config"
+		applyResolvedOriginalAppearance()
+	}
+	updateProcessList()
 	saveConfig()
 }
 
@@ -862,34 +866,10 @@ func hasCustomComponentColors(t *CustomThemeConfig) bool {
 // applyCustomThemeFile loads and applies custom theme from the mactop config directory
 // Returns (appliedForeground, appliedBackground) to indicate which colors were set
 func applyCustomThemeFile() (bool, bool) {
-	theme := loadThemeFile()
-	if theme == nil {
-		return false, false
-	}
-
-	appliedFg := false
-	appliedBg := false
-
-	// Apply custom background first (so foreground color applies on top)
-	if theme.Background != "" && IsHexColor(theme.Background) {
-		applyBackground(theme.Background)
-		currentConfig.Background = theme.Background
-		appliedBg = true
-	}
-
-	// Apply foreground color (primary UI color)
-	if theme.Foreground != "" && IsHexColor(theme.Foreground) {
-		applyTheme(theme.Foreground, IsLightMode)
-		currentConfig.Theme = theme.Foreground
-		currentConfig.CustomTheme = theme
-		appliedFg = true
-
-		// Apply per-component colors if any are specified
-		if hasCustomComponentColors(theme) {
-			foregroundColor, _ := ParseHexColor(theme.Foreground)
-			applyCustomPerComponentColors(theme, foregroundColor)
-		}
-	}
-
-	return appliedFg, appliedBg
+	a := resolveOriginalAppearance(currentConfig)
+	activeOriginalAppearance = &a
+	applyBackground(a.Background)
+	applyTheme(a.Theme, IsLightMode)
+	applyEffectiveComponentColors()
+	return a.Custom != nil, a.Custom != nil
 }

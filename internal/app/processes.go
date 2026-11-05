@@ -11,7 +11,7 @@ package app
 #include <mach/mach_time.h>
 
 static inline time_t get_proc_starttime(struct kinfo_proc *kp) {
-    return kp->kp_proc.p_un.__p_starttime.tv_sec;
+    return kp->kp_proc.p_un.__p_starttime.tv_sec * 1000000LL + kp->kp_proc.p_un.__p_starttime.tv_usec;
 }
 
 extern kern_return_t vm_deallocate(vm_map_t target_task, vm_address_t address, vm_size_t size);
@@ -69,6 +69,7 @@ type ProcessTimeState struct {
 	Timestamp time.Time
 	Command   string
 	CreateSec int64
+	Valid     bool
 }
 
 var prevProcessTimes = make(map[int]ProcessTimeState)
@@ -115,12 +116,13 @@ func processOsProc(kp C.struct_kinfo_proc, now time.Time, prevProcessTimes map[i
 		totalTimeNs = (rawTime * numer) / denom
 	}
 
-	cpuPercent := 0.0
-	if prevState, ok := prevProcessTimes[pid]; ok {
-		timeDelta := totalTimeNs - prevState.Time
-		wallDelta := now.Sub(prevState.Timestamp).Nanoseconds()
-		if wallDelta > 0 && timeDelta > 0 {
-			cpuPercent = (float64(timeDelta) / float64(wallDelta)) * 100.0
+	taskValid := ret == C.int(C.sizeof_struct_proc_taskinfo)
+	cpuPercent, cpuValid := 0.0, false
+	if previous, ok := prevProcessTimes[pid]; ok && taskValid && previous.Valid && previous.CreateSec == createSec && totalTimeNs >= previous.Time {
+		elapsed := now.Sub(previous.Timestamp).Seconds()
+		if elapsed > 0 {
+			cpuPercent = float64(totalTimeNs-previous.Time) / elapsed / 1e9 * 100
+			cpuValid = true
 		}
 	}
 
@@ -129,6 +131,7 @@ func processOsProc(kp C.struct_kinfo_proc, now time.Time, prevProcessTimes map[i
 		Timestamp: now,
 		Command:   comm,
 		CreateSec: createSec,
+		Valid:     taskValid,
 	}
 
 	memPercent := 0.0
@@ -156,6 +159,7 @@ func processOsProc(kp C.struct_kinfo_proc, now time.Time, prevProcessTimes map[i
 		Started:     "",
 		Time:        timeStr,
 		LastUpdated: now,
+		BirthTime:   createSec, CPUValid: cpuValid, RSSValid: taskValid, MemoryPercentValid: taskValid && totalMem > 0,
 	}
 	return pm, pid, newState, true
 }
@@ -177,7 +181,7 @@ func processStateString(stat C.char) string {
 	}
 }
 
-func getProcessList(systemGpuPercent float64) ([]ProcessMetrics, error) {
+func getProcessSnapshot(systemGpuPercent float64) ([]ProcessMetrics, error) {
 	var mib []C.int
 	var mibLen C.u_int
 
@@ -244,14 +248,6 @@ func getProcessList(systemGpuPercent float64) ([]ProcessMetrics, error) {
 
 	updateProcessGPUMetrics(processes, now, systemGpuPercent)
 
-	sort.Slice(processes, func(i, j int) bool {
-		return processes[i].CPU > processes[j].CPU
-	})
-
-	if filterPID == 0 && len(processes) > 500 {
-		processes = processes[:500]
-	}
-
 	return processes, nil
 }
 
@@ -262,17 +258,12 @@ func updateProcessGPUMetrics(processes []ProcessMetrics, now time.Time, systemGp
 
 	currentGPUStats := GetGPUProcessStats()
 	gpuElapsed := now.Sub(lastGPUProcessStatsTime).Seconds()
-	if gpuElapsed <= 0 {
-		gpuElapsed = 1
-	}
-
 	gpuMsPerSec := make(map[int]float64)
 	var totalRawGpuMs float64
-	if currentGPUStats != nil && lastGPUProcessStats != nil {
+	if currentGPUStats != nil && lastGPUProcessStats != nil && gpuElapsed > 0 {
 		for pid, currentTime := range currentGPUStats {
-			if prevTime, ok := lastGPUProcessStats[pid]; ok && currentTime >= prevTime {
-				deltaNs := currentTime - prevTime
-				gpuMs := float64(deltaNs) / gpuElapsed / 1_000_000
+			if previous, ok := lastGPUProcessStats[pid]; ok && currentTime >= previous {
+				gpuMs := float64(currentTime-previous) / gpuElapsed / 1_000_000
 				gpuMsPerSec[pid] = gpuMs
 				totalRawGpuMs += gpuMs
 			}
@@ -287,11 +278,16 @@ func updateProcessGPUMetrics(processes []ProcessMetrics, now time.Time, systemGp
 	}
 
 	for i := range processes {
-		if gpuMs, ok := gpuMsPerSec[processes[i].PID]; ok {
+		if gpuMs, ok := gpuMsPerSec[processes[i].PID]; ok && lastGPUProcessBirth[processes[i].PID] == processes[i].BirthTime {
 			processes[i].GPU = gpuMs * scaleFactor
+			processes[i].GPUValid = true
 		}
 	}
 
+	lastGPUProcessBirth = make(map[int]int64, len(processes))
+	for _, p := range processes {
+		lastGPUProcessBirth[p.PID] = p.BirthTime
+	}
 	lastGPUProcessStats = currentGPUStats
 	lastGPUProcessStatsTime = now
 }
@@ -446,15 +442,19 @@ func calculateMaxWidths(availableWidth int) map[string]int {
 }
 
 func buildHeader(maxWidths map[string]int, themeColorStr, selectedHeaderFg string) string {
+	return buildHeaderWithSort(maxWidths, themeColorStr, selectedHeaderFg, selectedColumn, sortReverse)
+}
+
+func buildHeaderWithSort(maxWidths map[string]int, themeColorStr, selectedHeaderFg string, sortColumn int, reverse bool) string {
 	header := ""
 	for i, col := range columns {
 		width := maxWidths[col]
 
 		// Determine arrow for selected column
 		arrow := ""
-		if i == selectedColumn {
+		if i == sortColumn {
 			arrow = "↓"
-			if sortReverse {
+			if reverse {
 				arrow = "↑"
 			}
 		}
@@ -500,14 +500,29 @@ func buildProcessRows(processes []ProcessMetrics, maxWidths map[string]int) []st
 		// 1000 ms/s = 100% GPU utilization
 		gpuPercent := p.GPU / 10.0
 
-		line := fmt.Sprintf("%*d %-*s %*s %*s %*.1f%% %*.1f%% %*.1f%% %*s %-s",
+		cpuText, gpuText, memText := fmt.Sprintf("%.1f%%", p.CPU), fmt.Sprintf("%.1f%%", gpuPercent), fmt.Sprintf("%.1f%%", p.Memory)
+		if isTop3Layout() {
+			if !p.RSSValid {
+				virtStr, resStr, timeStr = "--", "--", "--"
+			}
+			if !p.CPUValid {
+				cpuText = "--"
+			}
+			if !p.GPUValid {
+				gpuText = "--"
+			}
+			if !p.MemoryPercentValid {
+				memText = "--"
+			}
+		}
+		line := fmt.Sprintf("%*d %-*s %*s %*s %*s %*s %*s %*s %-s",
 			maxWidths["PID"], p.PID,
 			maxWidths["USER"], username,
 			maxWidths["VIRT"], virtStr,
 			maxWidths["RES"], resStr,
-			maxWidths["CPU"]-1, p.CPU,
-			maxWidths["GPU"]-1, gpuPercent,
-			maxWidths["MEM"]-1, p.Memory,
+			maxWidths["CPU"], cpuText,
+			maxWidths["GPU"], gpuText,
+			maxWidths["MEM"], memText,
 			maxWidths["TIME"], timeStr,
 			runewidth.Truncate(cmdName, maxWidths["CMD"], "..."),
 		)
@@ -531,18 +546,24 @@ func updateProcessList() {
 		return
 	}
 
-	processes := lastProcesses
-	if searchText != "" {
-		if filteredProcesses == nil {
-			processes = []ProcessMetrics{}
-		} else {
-			processes = filteredProcesses
-		}
-	}
-
-	if processes == nil {
+	if processList == nil {
 		return
 	}
+	var selected ProcessMetrics
+	if row := processList.SelectedRow - 1; row >= 0 && row < len(visibleProcesses) {
+		selected = visibleProcesses[row]
+	}
+	processes, valid, total := currentProcessView()
+	visibleProcesses = append([]ProcessMetrics(nil), processes...)
+	if selected.PID > 0 {
+		for i, p := range processes {
+			if p.PID == selected.PID && p.BirthTime == selected.BirthTime {
+				processList.SelectedRow = i + 1
+				break
+			}
+		}
+	}
+	processList.SelectedRow = max(0, min(processList.SelectedRow, len(processes)))
 
 	themeColorStr, selectedHeaderFg := resolveProcessThemeColor()
 
@@ -555,7 +576,10 @@ func updateProcessList() {
 	maxWidths := calculateMaxWidths(availableWidth)
 
 	header := buildHeader(maxWidths, themeColorStr, selectedHeaderFg)
-	sortProcesses(processes)
+	if isTop3Layout() {
+		column := map[string]int{"cpu": 4, "memory": 3, "gpu": 5}[htopConfig().TopMetric]
+		header = buildHeaderWithSort(maxWidths, themeColorStr, selectedHeaderFg, column, false)
+	}
 	rows := buildProcessRows(processes, maxWidths)
 
 	items := make([]string, len(processes)+1)
@@ -563,6 +587,12 @@ func updateProcessList() {
 	copy(items[1:], rows)
 
 	processList.Title, processList.TitleStyle = getProcessListTitle()
+	if isTop3Layout() {
+		processList.Title = top3Title(valid, total)
+		if len(processes) == 0 {
+			items = append(items, i18n.T("Top3_NoData"))
+		}
+	}
 	processList.Rows = items
 }
 
@@ -660,17 +690,20 @@ func updateKillModal() {
 
 	// Theme colors
 	var primaryColor ui.Color
-	var bg ui.Color = CurrentBgColor
+	var bg ui.Color = effectiveBackground()
 	// Ensure opacity
-	if GetCurrentBgName() == "clear" {
+	if bg == ui.ColorClear {
 		bg = ui.ColorBlack
+		if isHtopMode() {
+			bg = ui.NewRGBColor(0, 0, 0)
+		}
 	}
 
-	if IsPaletteTheme(currentConfig.Theme) {
+	if IsPaletteTheme(effectiveThemeName()) {
 		primaryColor = processList.TitleStyle.Fg
-	} else if IsLightMode && currentConfig.Theme == "white" {
+	} else if IsLightMode && effectiveThemeName() == "white" {
 		primaryColor = ui.ColorBlack
-	} else if color, ok := colorMap[currentConfig.Theme]; ok {
+	} else if color, ok := colorMap[effectiveThemeName()]; ok {
 		primaryColor = color
 	} else {
 		primaryColor = ui.ColorGreen
@@ -680,6 +713,14 @@ func updateKillModal() {
 	confirmModal.TextStyle = ui.NewStyle(ui.ColorWhite, bg)
 	if IsLightMode {
 		confirmModal.TextStyle = ui.NewStyle(ui.ColorBlack, bg)
+	}
+	if isHtopMode() {
+		color := ui.ColorWhite
+		r, g, b := bg.RGB()
+		if .299*float64(r)+.587*float64(g)+.114*float64(b) > 127.5 {
+			color = ui.ColorBlack
+		}
+		confirmModal.TextStyle = ui.NewStyle(color, bg)
 	}
 	confirmModal.BorderStyle = ui.NewStyle(primaryColor, bg)
 	confirmModal.TitleStyle = ui.NewStyle(primaryColor, bg, ui.ModifierBold)
@@ -694,6 +735,7 @@ func updateKillModal() {
 func showKillModal(pid int) {
 	killPending = true
 	killPID = pid
+	killBirthTime = processBirthTime(pid)
 	confirmModal.ActiveButtonIndex = 1
 
 	if len(confirmModal.Buttons) >= 2 {
@@ -737,10 +779,16 @@ func handleKillPending(e ui.Event) {
 }
 
 func executeKill() {
+	if killBirthTime <= 0 || processBirthTime(killPID) != killBirthTime {
+		stderrLogger.Printf("Process %d changed identity or exited; signal cancelled", killPID)
+		hideKillModal()
+		updateProcessList()
+		return
+	}
 	if err := syscall.Kill(killPID, syscall.SIGTERM); err == nil {
 		stderrLogger.Printf("Sent SIGTERM to PID %d\n", killPID)
 
-		if procs, err := getProcessList(lastGPUMetrics.ActivePercent); err == nil {
+		if procs, err := getProcessSnapshot(lastGPUMetrics.ActivePercent); err == nil {
 			lastProcesses = procs
 			if searchMode || searchText != "" {
 				updateFilteredProcesses()
@@ -788,7 +836,7 @@ func handleNavigation(e ui.Event) {
 
 func handleProcessListEvents(e ui.Event) {
 	// Don't handle process list navigation when in Info or Fan layout (allow their own scrolling)
-	if currentConfig.DefaultLayout == LayoutInfo || currentConfig.DefaultLayout == LayoutFan {
+	if effectiveLayout() == LayoutInfo || effectiveLayout() == LayoutFan {
 		return
 	}
 	if killPending {
@@ -800,4 +848,14 @@ func handleProcessListEvents(e ui.Event) {
 		return
 	}
 	handleNavigation(e)
+}
+
+func processBirthTime(pid int) int64 {
+	mib := []C.int{C.CTL_KERN, C.KERN_PROC, C.KERN_PROC_PID, C.int(pid)}
+	var kp C.struct_kinfo_proc
+	size := C.size_t(C.sizeof_struct_kinfo_proc)
+	if _, err := C.sysctl(&mib[0], 4, unsafe.Pointer(&kp), &size, nil, 0); err != nil || size == 0 {
+		return 0
+	}
+	return int64(C.get_proc_starttime(&kp))
 }

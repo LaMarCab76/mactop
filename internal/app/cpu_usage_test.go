@@ -130,8 +130,9 @@ func TestCPUCoreRenderingStaysInsideInner(t *testing.T) {
 }
 
 func TestHtopCoreSegmentsAndRedraw(t *testing.T) {
-	oldMode := activeUIMode
-	t.Cleanup(func() { activeUIMode = oldMode })
+	oldMode, oldConfig := activeUIMode, currentConfig
+	t.Cleanup(func() { activeUIMode, currentConfig = oldMode, oldConfig })
+	currentConfig.Htop = &HtopConfig{BarStyle: "classic"}
 	activeUIMode = UIModeHtop
 	w := &CPUCoreWidget{Block: ui.NewBlock(), cores: []float64{60}, breakdown: []CPUTimePercent{{Nice: 10, User: 30, System: 20, Valid: true}}}
 	w.Border = false

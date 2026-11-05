@@ -103,7 +103,7 @@ func setupUI() {
 	mainBlock.TitleBottomLeft = fmt.Sprintf(i18n.T("TUI_LayoutInfo"), currentLayoutNum, totalLayouts, currentColorName)
 	mainBlock.TitleBottom = i18n.T("TUI_InfoLayoutColorExit")
 	mainBlock.TitleBottomAlignment = ui.AlignCenter
-	mainBlock.TitleBottomRight = fmt.Sprintf(" -/+ %dms ", updateInterval)
+	mainBlock.TitleBottomRight = fmt.Sprintf(" -/+ %dms ", getUpdateInterval())
 
 	updateMainTitleWithHardware()
 
@@ -362,14 +362,14 @@ func updateModelText() {
 }
 
 func updateIntervalText() {
-	mainBlock.TitleBottomRight = fmt.Sprintf(" -/+ %dms ", updateInterval)
+	mainBlock.TitleBottomRight = fmt.Sprintf(" -/+ %dms ", getUpdateInterval())
 }
 
 func updateInfoUI() {
-	if currentConfig.DefaultLayout == LayoutFan {
+	if effectiveLayout() == LayoutFan {
 		themeColor := "green"
-		if currentConfig.Theme != "" {
-			themeColor = currentConfig.Theme
+		if effectiveThemeName() != "" {
+			themeColor = effectiveThemeName()
 		}
 		if IsLightMode && themeColor == "white" {
 			themeColor = "black"
@@ -389,7 +389,7 @@ func updateInfoUI() {
 		return
 	}
 
-	if currentConfig.DefaultLayout != LayoutInfo {
+	if effectiveLayout() != LayoutInfo {
 		return
 	}
 
@@ -397,8 +397,8 @@ func updateInfoUI() {
 	infoParagraph.BorderRounded = true
 
 	themeColor := "green"
-	if currentConfig.Theme != "" {
-		themeColor = currentConfig.Theme
+	if effectiveThemeName() != "" {
+		themeColor = effectiveThemeName()
 	}
 	if IsLightMode && themeColor == "white" {
 		themeColor = "black"
@@ -421,12 +421,12 @@ func updateHelpText() {
 		i18n.T("Help_FullText"),
 		prometheusStatus,
 		version,
-		currentConfig.DefaultLayout,
-		currentConfig.Theme,
+		effectiveLayout(),
+		effectiveThemeName(),
 		currentConfig.Background,
-		updateInterval,
+		getUpdateInterval(),
 	)
-	fullText = fmt.Sprintf(i18n.T("Help_UIMode"), uiModeName()) + "\n\n" + fullText
+	fullText = fmt.Sprintf(i18n.T("Help_UIMode"), uiModeName()) + "\n" + i18n.T("Settings_Help") + "\n\n" + fullText
 
 	lines := strings.Split(fullText, "\n")
 	_, termHeight := GetCachedTerminalDimensions()
@@ -509,7 +509,7 @@ func toggleHelpMenu() {
 		newGrid.SetRect(x, y, x+helpTextGridWidth, y+helpTextGridHeight)
 		grid = newGrid
 	} else {
-		applyLayout(currentConfig.DefaultLayout)
+		applyLayout(effectiveLayout())
 	}
 	width, height := ui.TerminalDimensions()
 	drawScreen(width, height)
@@ -520,7 +520,7 @@ func togglePartyMode() {
 	defer renderMutex.Unlock()
 	partyMode = !partyMode
 	if partyMode {
-		partyTicker = time.NewTicker(time.Duration(updateInterval/2) * time.Millisecond)
+		partyTicker = time.NewTicker(time.Duration(getUpdateInterval()/2) * time.Millisecond)
 		partyStop = make(chan struct{})
 		ticker, stop := partyTicker, partyStop
 		go func() {
@@ -545,6 +545,9 @@ func togglePartyMode() {
 		partyTicker.Stop()
 		close(partyStop)
 		partyTicker, partyStop = nil, nil
+		partyTheme = ""
+		applyResolvedOriginalAppearance()
+		updateProcessList()
 	}
 }
 
@@ -552,7 +555,15 @@ func advancePartyTheme() bool {
 	if isHtopMode() {
 		return false
 	}
-	cycleTheme(1)
+	index := 0
+	for i, name := range themeOrder {
+		if name == effectiveThemeName() {
+			index = i
+			break
+		}
+	}
+	partyTheme = themeOrder[(index+1)%len(themeOrder)]
+	applyTheme(partyTheme, IsLightMode)
 	return true
 }
 
@@ -563,54 +574,11 @@ func renderUI() {
 	renderContent(w, h)
 }
 
-func applyInitialTheme(colorName string, setColor bool) {
-	if setColor {
-		applyTheme(colorName, IsLightMode)
-	} else {
-		if currentConfig.Theme == "" {
-			currentConfig.Theme = "green"
-		}
-		applyTheme(currentConfig.Theme, IsLightMode)
-	}
-}
-
 // initializeTheme sets up all theming with priority: CLI flags > theme.json > saved config
 // Each property (foreground, background) is evaluated independently
 func initializeTheme(colorName string, setColor bool, interval int, setInterval bool) {
-	// Interval priority: 1) CLI --interval, 2) saved config, 3) default 1000ms
-	if setInterval {
-		updateInterval = interval
-		currentConfig.Interval = interval
-		updateIntervalText()
-	} else if currentConfig.Interval > 0 {
-		updateInterval = currentConfig.Interval
-		updateIntervalText()
-	}
-
-	// Always load theme.json to get both foreground and background values
-	// We'll selectively apply based on CLI flag priorities
-	fgFromFile, bgFromFile := applyCustomThemeFile()
-
-	// Foreground priority: 1) CLI --foreground, 2) theme.json, 3) saved config
-	if setColor {
-		applyTheme(colorName, IsLightMode)
-	} else if !fgFromFile {
-		// Neither CLI nor theme.json set foreground, use saved config
-		applyInitialTheme(colorName, false)
-	}
-	// else: theme.json foreground was already applied by applyCustomThemeFile()
-
-	// Background priority: 1) CLI --bg, 2) theme.json, 3) saved config
-	if cliBgColor != "" {
-		applyBackground(cliBgColor)
-		currentConfig.Background = cliBgColor
-	} else if !bgFromFile {
-		// Neither CLI nor theme.json set background, use saved config
-		applyInitialBackground()
-	}
-	// else: theme.json background was already applied by applyCustomThemeFile()
-
-	currentColorName = currentConfig.Theme
+	applyResolvedOriginalAppearance()
+	updateIntervalText()
 }
 
 // runAlternateMode checks for non-TUI modes and runs them.
@@ -705,7 +673,20 @@ func renderLoadingScreen() {
 	loadingText.SetRect(1, 1, termWidth-1, termHeight-1)
 
 	ui.Clear()
-	ui.Render(loadingBlock, loadingText)
+	if isHtopMode() {
+		bg := htopEffectiveBg()
+		p := htopPalette()
+		loadingBlock.BackgroundColor = bg
+		loadingBlock.BorderStyle = ui.NewStyle(p.user, bg)
+		loadingBlock.TitleStyle = ui.NewStyle(p.user, bg)
+		loadingText.BackgroundColor = bg
+		loadingText.TextStyle = ui.NewStyle(p.text, bg)
+		layer := &uiModeBackground{ui.NewBlock()}
+		layer.SetRect(0, 0, termWidth, termHeight)
+		ui.Render(layer, loadingBlock, loadingText)
+	} else {
+		ui.Render(loadingBlock, loadingText)
+	}
 }
 
 // drainSeededMetrics consumes the initial metrics pushed by seedInitialMetrics
@@ -748,7 +729,7 @@ func seedInitialMetrics() {
 	gpuMetrics := gpuMetricsFromSoc(m)
 	cpuMetricsChan <- cpuMetrics
 	gpuMetricsChan <- gpuMetrics
-	if processes, err := getProcessList(0.0); err == nil {
+	if processes, err := getProcessSnapshot(0.0); err == nil {
 		processMetricsChan <- processes
 	}
 	netdiskMetrics := getNetDiskMetrics()
@@ -800,15 +781,9 @@ func Run() {
 	sortReverse = currentConfig.SortReverse
 
 	flag.Parse()
+	normalizeCLIColors()
 
-	// Initialize i18n engine with override priorities
-	resolvedLanguage = currentConfig.Language
-	if cliLanguage != "" {
-		resolvedLanguage = cliLanguage // CLI overrides config.json
-	} else if envLang := os.Getenv("MACTOP_LANG"); envLang != "" {
-		resolvedLanguage = envLang
-	}
-	currentConfig.Language = resolvedLanguage
+	resolvedLanguage = resolvedLanguagePreference()
 	i18n.Init(resolvedLanguage)
 	activeUIMode, err = resolveUIMode(currentConfig.UIMode, cliUIMode)
 	if err != nil {
@@ -828,10 +803,17 @@ func Run() {
 
 	currentUser = os.Getenv("USER")
 
+	if err := resolveRuntimePreferences(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
 	if runAlternateMode() {
 		return
 	}
 
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	defer signal.Stop(sigCh)
 	IsLightMode = detectLightMode()
 
 	if err := ui.Init(); err != nil {
@@ -848,13 +830,18 @@ func Run() {
 		}
 	}()
 	if shouldShowStartupMenu() {
-		mode, accepted := chooseStartupUIMode(uiEvents)
+		mode, accepted := chooseStartupWithSignals(uiEvents, sigCh)
 		if !accepted {
 			return
 		}
 		activeUIMode, currentConfig.UIMode = mode, mode
 		saveConfig()
 		defer saveConfigFlush()
+	}
+
+	if err := resolveRuntimePreferences(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return
 	}
 
 	// Show branded loading screen immediately — gives instant visual feedback
@@ -865,6 +852,11 @@ func Run() {
 		stderrLogger.Fatalf("failed to initialize metrics: %v", err)
 	}
 	defer cleanupSocMetrics()
+	select {
+	case <-sigCh:
+		return
+	default:
+	}
 	defer cleanupFanControl()
 
 	StderrToLogfile(logfile)
@@ -898,8 +890,6 @@ func Run() {
 	// SIGHUP matters for --fan-control: without catching it, closing the
 	// terminal would terminate the process by default action and leave the fans
 	// pinned in manual mode.
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	go func() {
 		<-sigCh
 		shutdownAndExit(false)
@@ -909,7 +899,7 @@ func Run() {
 	go collectProcessMetrics(done, processMetricsChan, portMetricsChan, triggerProcessCollectionChan)
 	go collectNetDiskMetrics(done, netdiskMetricsChan)
 
-	ticker = time.NewTicker(time.Duration(updateInterval) * time.Millisecond)
+	ticker = time.NewTicker(time.Duration(getUpdateInterval()) * time.Millisecond)
 
 	startBackgroundUpdates(done)
 	renderUI()
@@ -1012,6 +1002,7 @@ func updateCPUUI(cpuMetrics CPUMetrics) {
 
 	totalUsage := cpuMetrics.AvgUsage
 	cpuGauge.Percent = int(totalUsage)
+	meterValues[cpuGauge] = totalUsage
 
 	updateCPUHistory(totalUsage)
 
@@ -1025,6 +1016,7 @@ func updateCPUUI(cpuMetrics CPUMetrics) {
 	if memoryMetrics.Total > 0 {
 		memoryPercent := (float64(memoryMetrics.Used) / float64(memoryMetrics.Total)) * 100
 		memoryGauge.Percent = int(memoryPercent)
+		meterValues[memoryGauge] = memoryPercent
 	}
 
 	updateMemoryHistory(memoryMetrics)
@@ -1039,7 +1031,7 @@ func updateCPUUI(cpuMetrics CPUMetrics) {
 	updateSoCPowerHistory(cpuMetrics)
 
 	if len(cpuMetrics.CoreUsages) > 0 {
-		if currentConfig.Theme == "1977" {
+		if effectiveThemeName() == "1977" {
 			update1977GaugeColors()
 		}
 	}
@@ -1088,7 +1080,7 @@ func updateCPUHistory(totalUsage float64) {
 			}
 
 			// In history_soc: single current value line + peak number in title only
-			if currentConfig.DefaultLayout == LayoutHistorySoC {
+			if effectiveLayout() == LayoutHistorySoC {
 				currentPeak := 0.0
 				if len(visiblePeak) > 0 {
 					currentPeak = visiblePeak[len(visiblePeak)-1]
@@ -1124,7 +1116,7 @@ func updateMemoryHistory(memoryMetrics MemoryMetrics) {
 	if memoryHistoryChart != nil {
 		termWidth, _ := GetCachedTerminalDimensions()
 		visibleWidth := (termWidth / 2) - 4 // Half width, account for borders
-		if currentConfig.DefaultLayout == LayoutHistorySoC {
+		if effectiveLayout() == LayoutHistorySoC {
 			visibleWidth = (termWidth / 3) - 4
 		}
 		if visibleWidth <= 0 || visibleWidth > len(memoryUsedHistory) {
@@ -1426,6 +1418,7 @@ func updateCPUGaugeTitles(totalUsage float64, cpuMetrics CPUMetrics) {
 	aneGauge.Label = aneGaugeInnerLabel(cpuMetrics, aneUtil, bwMode)
 	aneGauge.Title = aneGaugeTitle(cpuMetrics, aneUtil, cpuMetrics.ANEBW, bwMode)
 	aneGauge.Percent = int(aneUtil)
+	meterValues[aneGauge] = aneUtil
 }
 
 func updatePowerChartText(cpuMetrics CPUMetrics, thermalStr string) {
@@ -1529,7 +1522,7 @@ func updateMemoryPressureUI(memoryMetrics MemoryMetrics) {
 	if memoryPressureHistoryChart != nil {
 		termWidth, _ := GetCachedTerminalDimensions()
 		visibleWidth := termWidth - 4
-		if currentConfig.DefaultLayout == LayoutMemory {
+		if effectiveLayout() == LayoutMemory {
 			visibleWidth = (termWidth / 2) - 4
 		}
 		if visibleWidth <= 0 || visibleWidth > len(memoryPressureHistory) {
@@ -1559,6 +1552,7 @@ func updateGPUUI(gpuMetrics GPUMetrics) {
 		}
 	}
 	gpuGauge.Percent = int(gpuMetrics.ActivePercent)
+	meterValues[gpuGauge] = gpuMetrics.ActivePercent
 
 	for i := 0; i < len(gpuValues)-1; i++ {
 		gpuValues[i] = gpuValues[i+1]
@@ -1614,7 +1608,7 @@ func updateGPUUI(gpuMetrics GPUMetrics) {
 	renderGPUHistoryChart(gpuMetrics, avgGPU, effectiveNow)
 
 	// Update gauge colors with dynamic saturation if 1977 theme is active
-	if currentConfig.Theme == "1977" {
+	if effectiveThemeName() == "1977" {
 		update1977GaugeColors()
 	}
 }
@@ -1625,7 +1619,7 @@ func renderGPUHistoryChart(gpuMetrics GPUMetrics, avgGPU, effectiveNow float64) 
 	}
 	termWidth, _ := GetCachedTerminalDimensions()
 	visibleWidth := termWidth - 4
-	if currentConfig.DefaultLayout == LayoutHistoryFull || currentConfig.DefaultLayout == LayoutHistorySoC {
+	if effectiveLayout() == LayoutHistoryFull || effectiveLayout() == LayoutHistorySoC {
 		visibleWidth = (termWidth / 2) - 4
 	}
 	if visibleWidth <= 0 || visibleWidth > len(gpuValues) {
@@ -1636,7 +1630,7 @@ func renderGPUHistoryChart(gpuMetrics GPUMetrics, avgGPU, effectiveNow float64) 
 	visibleEffective := gpuEffectiveHistory[len(gpuEffectiveHistory)-visibleWidth:]
 	visiblePeak := gpuPeakHistory[len(gpuPeakHistory)-visibleWidth:]
 
-	if currentConfig.DefaultLayout == LayoutHistorySoC {
+	if effectiveLayout() == LayoutHistorySoC {
 		currentPeak := 0.0
 		if len(visiblePeak) > 0 {
 			currentPeak = visiblePeak[len(visiblePeak)-1]
@@ -1724,7 +1718,7 @@ func updateNetDiskUI(netdiskMetrics NetDiskMetrics) {
 	if ssdReadHistoryChart != nil {
 		termWidth, _ := GetCachedTerminalDimensions()
 		visibleWidth := termWidth - 4
-		if currentConfig.DefaultLayout == LayoutHistorySoC {
+		if effectiveLayout() == LayoutHistorySoC {
 			visibleWidth = (termWidth / 3) - 4
 		}
 		if visibleWidth <= 0 || visibleWidth > len(ssdReadHistory) {

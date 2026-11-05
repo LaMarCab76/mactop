@@ -4,6 +4,7 @@ import ui "github.com/metaspartan/gotui/v5"
 
 const (
 	LayoutDefault         = "default"
+	LayoutTop3            = "top3"
 	LayoutAlternative     = "alternative"
 	LayoutAlternativeFull = "alternative_full"
 	LayoutVertical        = "vertical"
@@ -31,65 +32,61 @@ const (
 var layoutOrder = []string{LayoutDefault, LayoutAlternative, LayoutAlternativeFull, LayoutVertical, LayoutCompact, LayoutDashboard, LayoutGaugesOnly, LayoutGPUFocus, LayoutCPUFocus, LayoutGPUMemory, LayoutMemory, LayoutNetworkIO, LayoutSmall, LayoutTiny, LayoutMicro, LayoutNano, LayoutPico, LayoutHistory, LayoutHistoryFull, LayoutHistorySoC, LayoutFan, LayoutPorts}
 
 func setupGrid() {
-	totalLayouts = len(layoutOrder)
-	for i, layout := range layoutOrder {
-		if layout == currentConfig.DefaultLayout {
-			currentLayoutNum = i
-			break
-		}
-	}
-	applyLayout(currentConfig.DefaultLayout)
+	runtimeLayout = preferredLayout()
+	lastActiveLayout = runtimeLayout
+	updateLayoutNumber()
+	applyLayout(effectiveLayout())
 }
 
 func cycleLayout(step int) {
-	currentIndex := 0
-	for i, layout := range layoutOrder {
-		if layout == currentConfig.DefaultLayout {
-			currentIndex = i
+	order := activeLayoutOrder()
+	index := 0
+	for i, l := range order {
+		if l == effectiveLayout() {
+			index = i
 			break
 		}
 	}
-	n := len(layoutOrder)
-	nextIndex := ((currentIndex+step)%n + n) % n
-	currentConfig.DefaultLayout = layoutOrder[nextIndex]
+	runtimeLayout = order[((index+step)%len(order)+len(order))%len(order)]
 	temporaryLayout = false
-	currentLayoutNum = nextIndex
-	totalLayouts = n
-	applyLayout(currentConfig.DefaultLayout)
+	lastActiveLayout = runtimeLayout
+	persistLayoutPreference(runtimeLayout)
+	updateLayoutNumber()
+	if !showHelp {
+		applyLayout(runtimeLayout)
+	}
 	updateHelpText()
+	updateProcessList()
 }
 
-// switchToLayout jumps directly to the named layout. Pressing the shortcut
-// again while already on it returns to the previously active layout.
 func switchToLayout(layoutName string) {
-	target := layoutName
-	targetTemporary := false
-	if currentConfig.DefaultLayout == layoutName {
-		// Already on the target layout: toggle back to wherever we came from.
-		// If that is unknown or would be a self-jump (e.g. the user reached
-		// this layout by cycling with l/L, so no jump recorded it), fall back
-		// to the default layout so the shortcut always leaves the layout
-		// instead of deadlocking on itself.
-		target = previousLayout
-		targetTemporary = previousLayoutTemporary
+	target, targetTemporary := layoutName, false
+	targetStable := lastActiveLayout
+	if effectiveLayout() == layoutName {
+		target, targetTemporary = previousLayout, previousLayoutTemporary
+		targetStable = previousStableLayout
 		if target == "" || target == layoutName {
-			target = LayoutDefault
-			targetTemporary = false
+			target, targetTemporary = LayoutDefault, false
 		}
 	}
-	previousLayout = currentConfig.DefaultLayout
-	previousLayoutTemporary = temporaryLayout
-	temporaryLayout = targetTemporary
-	for i, layout := range layoutOrder {
-		if layout == target {
-			currentLayoutNum = i
-			break
+	previousLayout, previousLayoutTemporary, previousStableLayout = effectiveLayout(), temporaryLayout, lastActiveLayout
+	runtimeLayout, temporaryLayout = target, targetTemporary
+	if !temporaryLayout {
+		lastActiveLayout = target
+		persistLayoutPreference(target)
+	} else {
+		lastActiveLayout = targetStable
+		if lastActiveLayout == "" {
+			lastActiveLayout = LayoutDefault
 		}
+		persistLayoutPreference(lastActiveLayout)
 	}
-	currentConfig.DefaultLayout = target
-	totalLayouts = len(layoutOrder)
-	applyLayout(target)
+	updateLayoutNumber()
+	if !showHelp {
+		applyLayout(target)
+	}
 	updateHelpText()
+	updateProcessList()
 }
 
 func applyLayout(layoutName string) {
@@ -108,6 +105,10 @@ func applyLayout(layoutName string) {
 }
 
 func setLayoutGrid(layoutName string) {
+	if layoutName == LayoutTop3 && isHtopMode() {
+		setHtopDefaultLayoutGrid()
+		return
+	}
 	if setCompactLikeLayout(layoutName) {
 		return
 	}
@@ -613,7 +614,7 @@ func setHistorySoCLayoutGrid() {
 	)
 
 	// Force orange for memory graph specifically in history_soc
-	if currentConfig.DefaultLayout == LayoutHistorySoC && memoryHistoryChart != nil {
+	if effectiveLayout() == LayoutHistorySoC && memoryHistoryChart != nil {
 		memoryHistoryChart.LineColors = []ui.Color{ui.ColorOrange, ui.ColorMagenta}
 	}
 }

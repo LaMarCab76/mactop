@@ -74,11 +74,16 @@ type GPUMetrics struct {
 }
 
 type ProcessMetrics struct {
+	MemoryPercentValid                       bool `json:"-"`
 	PID                                      int
 	CPU, LastTime, Memory, GPU               float64 // GPU is ms/s of GPU time
 	VSZ, RSS                                 int64
 	User, TTY, State, Started, Time, Command string
 	LastUpdated                              time.Time
+	BirthTime                                int64 `json:"-"`
+	CPUValid                                 bool  `json:"-"`
+	RSSValid                                 bool  `json:"-"`
+	GPUValid                                 bool  `json:"-"`
 }
 
 type MemoryMetrics struct {
