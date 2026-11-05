@@ -139,6 +139,9 @@ func parseSetting(s settingSpec, value string) (json.RawMessage, error) {
 		for _, item := range strings.Split(value, ",") {
 			item = strings.ToLower(strings.TrimSpace(item))
 			valid := overlayValidSections[item]
+			if s.Key == "htop.processes.blocks" {
+				valid = stringIn(item, []string{"cpu", "gpu", "memory"})
+			}
 			if s.Key == "overlay.collapsed_sections" {
 				valid = stringIn(item, []string{"fps", "frame", "cpu", "gpu", "ane", "memory"})
 			}
@@ -157,7 +160,7 @@ func parseSetting(s settingSpec, value string) (json.RawMessage, error) {
 		if s.Key == "menubar.bar_order" && len(values) != 4 {
 			return nil, fmt.Errorf("bar order requires cpu,gpu,ane,memory")
 		}
-		if s.Key == "menubar.bar_order" || s.Key == "overlay.sections" {
+		if s.Key == "menubar.bar_order" || s.Key == "overlay.sections" || s.Key == "htop.processes.blocks" {
 			result = strings.Join(values, ",")
 		} else {
 			result = values

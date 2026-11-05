@@ -130,6 +130,10 @@ func drawScreen(w, h int) {
 }
 
 func renderContent(w, h int) {
+	if isHtopMode() {
+		renderWithUIMode(func() { root := &btopRoot{ui.NewBlock()}; root.SetRect(0, 0, w, h); ui.Render(root) })
+		return
+	}
 	if activeSettings != nil {
 		activeSettings.SetRect(0, 0, w, h)
 		ui.Render(activeSettings)
@@ -310,8 +314,11 @@ func handleKeyboardEvent(e ui.Event, done chan struct{}) {
 		return
 	}
 
-	if key == "<F2>" && isHtopMode() {
+	if (key == "<F2>" || key == "<F6>") && isHtopMode() {
 		activeSettings = newSettingsEditor(false)
+		if key == "<F6>" {
+			activeSettings = newBtopQuickEditor()
+		}
 		drawScreen(GetCachedTerminalDimensions())
 		renderMutex.Unlock()
 		return

@@ -18,6 +18,7 @@ type settingsEditor struct {
 	*ui.Block
 	draft                   AppConfig
 	startup                 bool
+	quick                   bool
 	category, index, scroll int
 	editing                 bool
 	input, status, command  string
@@ -42,6 +43,15 @@ func settingsCategories() []string {
 }
 
 func (e *settingsEditor) fields() []settingSpec {
+	if e.quick {
+		var fields []settingSpec
+		for _, s := range settingCatalog {
+			if strings.HasPrefix(s.Key, "htop.processes.") {
+				fields = append(fields, s)
+			}
+		}
+		return fields
+	}
 	categories := settingsCategories()
 	if len(categories) == 0 {
 		return nil
@@ -147,7 +157,17 @@ func (e *settingsEditor) key(key string) (close, quit bool) {
 			return
 		}
 		if !e.startup {
+			for key := range e.edits {
+				if strings.HasPrefix(key, "htop.processes.") {
+					btopProcessOverride = nil
+					break
+				}
+			}
 			applySavedSettings(before)
+		}
+		if e.quick {
+			btopProcessOverride = nil
+			updateProcessList()
 		}
 		return true, false
 	}
@@ -179,6 +199,22 @@ func (e *settingsEditor) key(key string) (close, quit bool) {
 		return
 	}
 	s := e.current()
+	if e.quick && key == "<Enter>" {
+		var draft *BtopProcessConfig
+		if e.draft.Htop != nil {
+			draft = e.draft.Htop.Processes
+		}
+		c := normalizeBtopProcessOptions(draft)
+		btopProcessOverride = &c
+		updateProcessList()
+		return true, false
+	}
+	if e.quick && key == "e" {
+		e.editing = true
+		e.input = e.value(s)
+		e.status = ""
+		return
+	}
 	switch key {
 	case "<Escape>", "q":
 		return true, false
@@ -268,6 +304,9 @@ func (e *settingsEditor) actionCommand(s settingSpec) string {
 }
 
 func settingOverride(s settingSpec) string {
+	if strings.HasPrefix(s.Key, "htop.processes.") && btopProcessOverride != nil {
+		return "F6 (session)"
+	}
 	for _, name := range s.CLI {
 		if flagWasSet(strings.TrimLeft(name, "-")) {
 			return name
@@ -300,7 +339,11 @@ func (e *settingsEditor) Draw(buf *ui.Buffer) {
 		}
 	}
 	categories := settingsCategories()
-	write(area.Min.Y, fmt.Sprintf("[%d/%d] %s · Tab / Shift-Tab", e.category+1, len(categories), settingCategoryLabel(categories[e.category])), ui.NewStyle(p.user, bg, ui.ModifierBold))
+	heading := fmt.Sprintf("[%d/%d] %s · Tab / Shift-Tab", e.category+1, len(categories), settingCategoryLabel(categories[e.category]))
+	if e.quick {
+		heading = i18n.T("Btop_QuickTitle")
+	}
+	write(area.Min.Y, heading, ui.NewStyle(p.user, bg, ui.ModifierBold))
 	footer := min(6, max(1, area.Dy()/3))
 	rows := max(0, area.Dy()-footer-1)
 	if e.index < e.scroll {
@@ -356,11 +399,21 @@ func (e *settingsEditor) Draw(buf *ui.Buffer) {
 	if status != "" {
 		write(area.Max.Y-2, status, ui.NewStyle(p.system, bg))
 	}
-	write(area.Max.Y-1, i18n.T("Settings_Keys"), text)
+	keys := i18n.T("Settings_Keys")
+	if e.quick {
+		keys = i18n.T("Btop_QuickKeys")
+	}
+	write(area.Max.Y-1, keys, text)
 }
 
 // Caller holds renderMutex; this path never runs before widget setup.
 func applySavedSettings(before AppConfig) {
+	for _, key := range []string{"htop.processes.mode", "htop.processes.count", "htop.processes.blocks", "htop.processes.name", "htop.processes.user"} {
+		if configValue(before, key) != configValue(currentConfig, key) {
+			btopProcessOverride = nil
+			break
+		}
+	}
 	if before.Interval != currentConfig.Interval && !flagWasSet("interval", "i") {
 		ms := currentConfig.Interval
 		if ms == 0 {
@@ -420,6 +473,10 @@ func applySavedSettings(before AppConfig) {
 }
 
 func effectiveSettingValue(s settingSpec) string {
+	if strings.HasPrefix(s.Key, "htop.processes.") {
+		c := btopProcessOptions()
+		return configValue(AppConfig{Htop: &HtopConfig{Processes: &c}}, s.Key)
+	}
 	switch s.Key {
 	case "ui_mode":
 		return activeUIMode

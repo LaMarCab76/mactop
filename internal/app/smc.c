@@ -133,16 +133,11 @@ kern_return_t SMCReadKey(io_connect_t conn, const char *key,
   return kIOReturnSuccess;
 }
 
-double SMCGetFloatValue(io_connect_t conn, const char *key) {
-  SMCKeyData_t val;
-  kern_return_t result = SMCReadKey(conn, key, &val);
-  if (result != kIOReturnSuccess) {
-    return 0.0;
-  }
-
-  unsigned int type = val.keyInfo.dataType;
-  unsigned int size = val.keyInfo.dataSize;
-  const unsigned char *b = (const unsigned char *)val.bytes;
+static double SMCDecodeFloatValue(const SMCKeyData_t *val, int *valid) {
+  *valid = 1;
+  unsigned int type = val->keyInfo.dataType;
+  unsigned int size = val->keyInfo.dataSize;
+  const unsigned char *b = (const unsigned char *)val->bytes;
 
   // IEEE 754 float — AppleSMC stores it native (little-endian) on this platform.
   if (SMCIsType(type, "flt ") && size >= sizeof(float)) {
@@ -187,7 +182,25 @@ double SMCGetFloatValue(io_connect_t conn, const char *key) {
     }
   }
 
+  *valid = 0;
   return 0.0;
+}
+
+kern_return_t SMCReadFloatValue(io_connect_t conn, const char *key, double *out) {
+  SMCKeyData_t val;
+  if (out == NULL) return kIOReturnBadArgument;
+  *out = 0;
+  kern_return_t result = SMCReadKey(conn, key, &val);
+  if (result != kIOReturnSuccess) return result;
+  int valid = 0;
+  *out = SMCDecodeFloatValue(&val, &valid);
+  return valid ? kIOReturnSuccess : kIOReturnUnsupported;
+}
+
+double SMCGetFloatValue(io_connect_t conn, const char *key) {
+  double value = 0;
+  SMCReadFloatValue(conn, key, &value);
+  return value;
 }
 
 int SMCKeyTypeIsScaled(io_connect_t conn, const char *key) {

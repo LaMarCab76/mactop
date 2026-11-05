@@ -23,6 +23,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"syscall"
 	"time"
@@ -501,7 +502,7 @@ func buildProcessRows(processes []ProcessMetrics, maxWidths map[string]int) []st
 		gpuPercent := p.GPU / 10.0
 
 		cpuText, gpuText, memText := fmt.Sprintf("%.1f%%", p.CPU), fmt.Sprintf("%.1f%%", gpuPercent), fmt.Sprintf("%.1f%%", p.Memory)
-		if isTop3Layout() {
+		if isHtopMode() {
 			if !p.RSSValid {
 				virtStr, resStr, timeStr = "--", "--", "--"
 			}
@@ -541,6 +542,7 @@ func buildProcessRows(processes []ProcessMetrics, maxWidths map[string]int) []st
 }
 
 func updateProcessList() {
+	refreshBtopProcesses()
 	if isPortsLayoutActive() {
 		updatePortsList()
 		return
@@ -556,6 +558,9 @@ func updateProcessList() {
 	processes, valid, total := currentProcessView()
 	visibleProcesses = append([]ProcessMetrics(nil), processes...)
 	if selected.PID > 0 {
+		if isHtopMode() && btopProcessOptions().Mode == "list" {
+			processList.SelectedRow = 0
+		}
 		for i, p := range processes {
 			if p.PID == selected.PID && p.BirthTime == selected.BirthTime {
 				processList.SelectedRow = i + 1
@@ -630,7 +635,7 @@ func handleSearchInput(e ui.Event) {
 		updateProcessList()
 	default:
 		// Only append printable characters (simple check)
-		if len(e.ID) == 1 {
+		if len(e.ID) == 1 || (isHtopMode() && !strings.HasPrefix(e.ID, "<") && utf8.ValidString(e.ID)) {
 			searchText += e.ID
 			if isPortsLayoutActive() {
 				updateFilteredPorts()
@@ -845,6 +850,9 @@ func handleProcessListEvents(e ui.Event) {
 	}
 	if searchMode {
 		handleSearchInput(e)
+		return
+	}
+	if handleBtopProcessKey(e.ID) {
 		return
 	}
 	handleNavigation(e)

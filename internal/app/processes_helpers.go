@@ -105,6 +105,18 @@ func getProcessListTitle() (string, ui.Style) {
 }
 
 func attemptKillProcess() {
+	if isHtopMode() && !isPortsLayoutActive() {
+		if !btopPanelsVisible {
+			return
+		}
+		if btopProcessOptions().Mode == "tops" {
+			attemptBtopKill()
+			return
+		}
+		if btopProcessOptions().Mode == "hidden" {
+			return
+		}
+	}
 	if isPortsLayoutActive() {
 		ports := currentViewPorts()
 		if len(ports) > 0 && processList.SelectedRow < len(ports)+1 {

@@ -143,6 +143,9 @@ func loadConfig() {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		loadErr = err
 	}
+	if cfg.UIMode == "btop" {
+		cfg.UIMode = UIModeHtop
+	}
 	cfg.Theme = migrateThemeName(cfg.Theme)
 	validateLoadedPreferences(&cfg)
 	currentConfig = cfg

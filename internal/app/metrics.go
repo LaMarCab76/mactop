@@ -129,6 +129,7 @@ func normalizeSocMetricsPower(m SocMetrics) SocMetrics {
 
 func cpuMetricsFromSoc(m SocMetrics, coreUsages []float64, avgUsage float64, throttled bool) CPUMetrics {
 	return CPUMetrics{
+		PowerReadings:    m.PowerReadings,
 		CPUW:             m.CPUPower,
 		GPUW:             m.GPUPower,
 		ANEW:             m.ANEPower,
@@ -294,6 +295,7 @@ func aneBWLabelMode(m CPUMetrics) bool {
 
 func gpuMetricsFromSoc(m SocMetrics) GPUMetrics {
 	return GPUMetrics{
+		Valid:         m.GPUUsageValid,
 		FreqMHz:       int(m.GPUFreqMHz),
 		ActivePercent: m.GPUActive,
 		Power:         m.GPUPower + m.GPUSRAMPower,
@@ -490,20 +492,24 @@ func GetCPUPercentages() ([]float64, error) {
 }
 
 func getNetDiskMetrics() NetDiskMetrics {
+	return getNetDiskMetricsFrom(time.Now(), GetNativeNetworkMetrics, GetNativeDiskMetrics)
+}
+
+func getNetDiskMetricsFrom(now time.Time, readNetwork func() (map[string]NativeNetMetric, error), readDisk func() (map[string]NativeDiskMetric, error)) NetDiskMetrics {
 	var metrics NetDiskMetrics
 
 	netDiskMutex.Lock()
 	defer netDiskMutex.Unlock()
 
-	now := time.Now()
 	elapsed := now.Sub(lastNetDiskTime).Seconds()
+	validElapsed := !lastNetDiskTime.IsZero() && elapsed > 0
 	if elapsed <= 0 {
 		elapsed = 1
 	}
 
 	// Native Network Metrics
-	netMap, err := GetNativeNetworkMetrics()
-	if err == nil {
+	netMap, netErr := readNetwork()
+	if netErr == nil {
 		var totalNet NativeNetMetric
 		for _, iface := range netMap {
 			totalNet.BytesRecv += iface.BytesRecv
@@ -524,8 +530,8 @@ func getNetDiskMetrics() NetDiskMetrics {
 	}
 
 	// Native Disk Metrics
-	diskMap, err := GetNativeDiskMetrics()
-	if err == nil {
+	diskMap, diskErr := readDisk()
+	if diskErr == nil {
 		var totalDisk NativeDiskMetric
 		for _, d := range diskMap {
 			totalDisk.ReadBytes += d.ReadBytes
@@ -543,6 +549,7 @@ func getNetDiskMetrics() NetDiskMetrics {
 		lastDiskStats = totalDisk
 	}
 
+	metrics.NetworkValid, metrics.DiskValid = btopRateState.observe(netMap, netErr, diskMap, diskErr, validElapsed)
 	lastNetDiskTime = now
 	return metrics
 }

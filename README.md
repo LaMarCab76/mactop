@@ -399,64 +399,99 @@ Each command performs its SMC writes, prints the resulting fan state as JSON to 
 
 > **⚠️ Unlike the interactive TUI, `--fan-set` intentionally leaves the fans pinned in manual mode after mactop exits** — that's what makes it usable headlessly. Nothing will restore automatic control until you run `sudo mactop --fan-auto` (or reboot). Pinning fans below their automatic speed under load can cause thermal throttling; the macOS thermal governor may also override manual targets on recent macOS versions.
 
-## Original and htop UI modes
+## Original and btop UI modes
 
-Run **`mactop`** to open the startup menu:
-
-1. **New TUI (htop)**
-2. **Original**
-
-Use the arrow keys and Enter, or press `1`/`2`. **New TUI** opens a submenu
-with **Start**, **Settings**, and **Back**; Original starts directly. `q` or
-Ctrl-C exits before monitoring starts. The root menu highlights the last chosen
-interface. A confirmed menu selection updates the preferred interface, including
-when Start follows an earlier edit in Settings. Press **`v`** inside the monitor
-to switch and save that preference.
-To skip the menu for one session:
+Run **`mactop`** to open the startup menu. Choose **New TUI (btop)** or
+**Original**. The new interface has Start, Settings, and Back. It remembers the
+last confirmed choice. `v` switches interfaces and saves that choice.
 
 ```sh
-mactop --ui-mode htop
+mactop --ui-mode btop
 mactop --ui-mode original
+# Compatibility alias for existing scripts:
+mactop --ui-mode htop
 ```
 
-CLI overrides are temporary and do not become preferences when another option is
-saved. Headless output, native menu bar/overlay modes, diagnostics, `--help` and
-`--version` bypass the startup menu.
+An explicit CLI choice bypasses the menu for this session. Saving another
+setting does not persist the CLI override. The configuration keeps its existing
+`ui_mode: "htop"` identifier and `htop` section; `btop` is accepted on input too.
+Headless, menu bar, overlay, diagnostics, help and version bypass the menu.
 
-**Settings** is also available with **F2** in the new interface. Tab/Shift-Tab
-changes category; arrows navigate or choose a value; Enter edits; `d` restores
-the default; **F10 saves** and **Esc cancels**. Edits stay in a separate draft
-until a successful save. The editor includes interface layouts, colors,
-interval, language, units, process ordering, headless output defaults, and all
-menu bar/overlay preferences. Optional fields distinguish the default from an
-explicit value. Session overrides and when a change takes effect are shown.
-Language changes apply to the next process; native preferences apply the next
-time that mode is explicitly opened. Launch modes, PID filters, diagnostics,
-Prometheus and fan operations have command information; saving settings never
-activates them. PID filters remain session-only because PIDs can be recycled.
+The first layouts (`l` / `L`) are **Summary** (`default`), **GPU/AI**
+(`gpu_focus`), **Energy** (`energy`), and **Processes** (`processes`). Existing
+layouts, including Info, Fan, Ports and the `top3` compatibility layout, remain
+available. New TUI requires **80 columns by 24 rows**; smaller terminals show a
+size notice. Original retains its existing layouts and appearance.
 
-The new interface uses an **explicit RGB black background by default**, separate
-from Original. Choose another background in Settings or with `b`/`B`. The CLI
-`--bg` override follows the active interface for that session. Block meters and
-history charts use a gradient within each component's color; Classic `|` and
-plain blocks remain selectable. CPU bars retain **blue for nice, green for user,
-and red for system time**, all from the same native CPU sample. An unavailable
-core sample shows `--`. E/P/S labels follow the detected Apple Silicon topology.
-GPU/network use cyan, memory/power yellow, and ANE magenta. Warning colors and
-binary ANE power-state labels keep their meaning. Memory uses macOS measurements.
+### Power in every view
 
-Choose the **Top 3** layout in Settings or with `l`/`L`. It shows one process list
-ranked by **CPU, resident memory (RES), or GPU**. Left/Right changes the criterion.
-Search filters the full snapshot before ranking, ties use ascending PID, and
-unavailable values do not become fake zeros. Partial coverage is identified.
-Freeze stops automatic sample updates; a confirmed F9 refreshes the list
-explicitly. In Top 3, F9 validates the displayed process identity before signalling.
-Original retains its existing 500-process projection and layouts. Each interface
-remembers its own layout, including temporary Info/Fan return state.
+A persistent power panel stays above the content in all New TUI layouts,
+including Settings, help and the F9 confirmation. Energy expands this same
+panel. It always includes its history, current reading, **session minimum and
+maximum**, and CPU/GPU watts. Optional measured SoC, RAM and ANE readings are
+configured under New TUI settings. Graphs use braille when supported, blocks or
+ASCII otherwise. The latest sample is at the right, and the displayed span
+uses actual sample timestamps; horizontal positions represent sample indices. Resizing or changing layouts does not reset
+statistics or add samples.
 
-All previous layouts remain available. The default new layout adapts its CPU
-panel to the terminal size, using compact percentages or an omitted-core count
-when necessary. Below 18 rows it prioritizes CPU and processes.
+The primary series can be `auto`, `sensor`, `sum`, `soc`, or `ram`. Auto prefers
+a valid equipment sensor, tolerating brief missing samples before falling back
+to the measured component sum. The sensor key is identified. Component sums
+explicitly have **partial coverage**: they do not prove whole-SoC or wall-socket
+power. GPU watts include measured GPU SRAM when available; CPU/GPU are already
+included in SoC sums. Unknown readings are `—` and gaps, not invented zeros.
+A source/coverage change starts a new graph segment. Session extrema are kept
+independently per source/coverage and restored when that source returns.
+Graph scale and measured maximum are independent.
+
+The raw equipment sensor is kept separate from legacy `PackageW` normalization.
+The legacy residual is labelled **Unattributed** in New TUI, never as measured
+screen or peripheral power. No validated per-screen or per-peripheral sensor
+is exposed by the current collectors, so these readings remain unavailable.
+Adapter/USB-PD nominal wattage is not a consumption measurement. ANE activity
+may be a percentage, binary state or bandwidth, independently of whether its
+power counter is available.
+
+### Process blocks and filters
+
+The default is **three simultaneous Top 3 blocks: CPU, GPU and resident memory**.
+Choose Top 3, 5 or 10 and any subset of the blocks, a filtered list (`list`), or
+no processes (`hidden`, giving graphs more room). Rankings use the complete
+snapshot, apply name and user filters before ranking, break ties by PID, and
+exclude unknown metrics. A process can legitimately appear in several blocks.
+Per-process GPU is marked `~` because it is approximate AGX-time attribution.
+Coverage counts distinguish missing data from an empty filter result.
+
+- **F2**: full Settings. Changes stay in a draft; F10 saves and Esc cancels.
+- **F6**: process options while monitoring. Arrows choose a field/value;
+  `e` edits text. Enter applies the draft **only to the session**; F10 saves
+  and applies it; Esc cancels. Both editors use the same validated fields.
+- **Tab / Shift-Tab**: focus a Top block; arrows or `j` / `k` select its rows.
+  `g` / `G` jump to its first/last row. When N exceeds the available space,
+  the block scrolls; resizing never changes N or hides selected categories.
+- **/**: temporary name search. **f** freezes the process snapshot in all
+  blocks together; system histories continue updating.
+- **F9**: confirm an action on the selected process in the focused block.
+  PID and birth identity are checked. If it leaves the ranking, selection is
+  cleared, so F9 cannot silently act on its replacement.
+
+For example, persistent defaults in `config.json`:
+
+```json
+{
+  "ui_mode": "htop",
+  "htop": {
+    "layout": "default",
+    "power": {"source": "auto", "show_soc": true, "show_ram": true, "show_ane": false},
+    "processes": {"mode": "tops", "count": 3, "blocks": "cpu,gpu,memory", "name": "", "user": ""}
+  }
+}
+```
+
+Original retains its 500-process projection. Native menu bar/overlay, Prometheus
+and headless output keep their existing contracts. PID restrictions remain
+session-only. The New TUI background is separate from Original and defaults to
+RGB black; saved component colors and CLI overrides still apply.
 
 Original's colors are independent. With `theme_source: "auto"` (the default),
 `theme.json` keeps its previous precedence over saved colors. Editing Original

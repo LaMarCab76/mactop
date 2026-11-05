@@ -282,6 +282,10 @@ func decorateHtopMeters(restore *[]func()) {
 	}
 	for _, item := range grid.Items {
 		switch source := item.Entry.(type) {
+		case *w.List:
+			if source == processList && !isPortsLayoutActive() {
+				replaceUIValue(restore, &item.Entry, any(&btopProcessArea{&source.Block}))
+			}
 		case *w.Gauge:
 			replaceUIValue(restore, &item.Entry, any(&htopGauge{source}))
 		case *w.StepChart:

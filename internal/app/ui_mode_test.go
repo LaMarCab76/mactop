@@ -2,7 +2,6 @@ package app
 
 import (
 	"encoding/json"
-	"fmt"
 	"image"
 	"os"
 	"reflect"
@@ -63,6 +62,12 @@ func modeTestUI(t *testing.T) {
 	replaceUIValue(&restore, &activeSettings, (*settingsEditor)(nil))
 	replaceUIValue(&restore, &visibleProcesses, ([]ProcessMetrics)(nil))
 	replaceUIValue(&restore, &meterValues, map[*w.Gauge]float64{})
+	replaceUIValue(&restore, &btopData, btopTelemetry{})
+	replaceUIValue(&restore, &btopPanels, map[string]*btopProcessPanel{})
+	replaceUIValue(&restore, &btopFocus, "cpu")
+	replaceUIValue(&restore, &btopPanelsVisible, false)
+	replaceUIValue(&restore, &btopProcessOverride, (*BtopProcessConfig)(nil))
+	replaceUIValue(&restore, &btopMemory, MemoryMetrics{})
 
 	replaceUIValue(&restore, &activeUIMode, UIModeOriginal)
 	replaceUIValue(&restore, &showHelp, false)
@@ -149,7 +154,7 @@ func TestUIModePreservesHelpAndTemporaryLayouts(t *testing.T) {
 		if grid != helpGrid || !showHelp || !strings.Contains(helpText.Text, uiModeName()) {
 			t.Fatal("switch replaced the help grid or failed to refresh its text")
 		}
-		if strings.Contains(mainBlock.TitleBottomLeft, "htop") != (mode == UIModeHtop) {
+		if strings.Contains(mainBlock.TitleBottomLeft, "btop") != (mode == UIModeHtop) {
 			t.Fatalf("stale footer after help mode switch to %s: %q", mode, mainBlock.TitleBottomLeft)
 		}
 	}
@@ -325,48 +330,29 @@ func TestUIModeDefaultLayoutAtTerminalSizes(t *testing.T) {
 				t.Fatal("resize accumulated old grid entries")
 			}
 			renderContent(size.X, size.Y)
-			if mode == UIModeHtop && !strings.Contains(mainBlock.TitleBottomLeft, "htop") {
+			if mode == UIModeHtop && !strings.Contains(mainBlock.TitleBottomLeft, "btop") {
 				t.Fatal("mode indicator lost")
 			}
-			if mode == UIModeHtop && size.X == 80 && cpuCoreWidget.Inner.Dx() < 70 {
-				t.Fatal("CPU bars did not get full terminal width")
+			if mode == UIModeHtop && size.X == 80 && btopContentRect(size.X, size.Y).Dy() < 10 {
+				t.Fatal("btop left no usable content area")
 			}
 		}
 	}
 }
 
-func TestHtopDefaultLayoutDoesNotLoseCoreRowsToRounding(t *testing.T) {
+func TestBtopDefaultLayoutKeepsHistoryAndTopsWithManyCores(t *testing.T) {
 	modeTestUI(t)
 	activeUIMode = UIModeHtop
-	for _, tc := range []struct{ height, cores, rows int }{{49, 14, 4}, {57, 20, 5}, {51, 24, 6}, {46, 52, 13}, {47, 44, 11}, {200, 128, 32}} {
-		t.Run(fmt.Sprintf("%d-rows-%d-cores", tc.height, tc.cores), func(t *testing.T) {
-			ui.DefaultBackend.Screen.SetSize(120, tc.height)
-			UpdateCachedTerminalDimensions(120, tc.height)
-			cpuCoreWidget.cores = make([]float64, tc.cores)
-			cpuCoreWidget.labels = make([]string, tc.cores)
-			for i := range cpuCoreWidget.labels {
-				cpuCoreWidget.labels[i] = fmt.Sprintf("C%d", i)
-			}
-			applyLayout(LayoutDefault)
-			buf := ui.NewBuffer(image.Rect(0, 0, 120, tc.height))
-			renderWithUIMode(func() { grid.Draw(buf) })
-			if cpuCoreWidget.Inner.Dy() != tc.rows {
-				t.Fatalf("CPU inner rows=%d, want %d", cpuCoreWidget.Inner.Dy(), tc.rows)
-			}
-			if gpuGauge.GetRect().Dy() != 4 || PowerChart.GetRect().Dy() != 6 {
-				t.Fatal("fixed-height panels lost rows")
-			}
-			var text strings.Builder
-			for _, cell := range buf.Cells {
-				text.WriteRune(cell.Rune)
-			}
-			rendered := text.String()
-			for i := range tc.cores {
-				if !strings.Contains(rendered, fmt.Sprintf("%-3s[", fmt.Sprintf("C%d", i))) {
-					t.Fatalf("core %d was omitted despite sufficient space", i)
-				}
-			}
-		})
+	for _, cores := range []int{8, 20, 52, 128} {
+		cpuCoreWidget.cores = make([]float64, cores)
+		ui.DefaultBackend.Screen.SetSize(120, 40)
+		UpdateCachedTerminalDimensions(120, 40)
+		applyLayout(LayoutDefault)
+		updateProcessList()
+		renderContent(120, 40)
+		if !btopPanelsVisible || btopContentRect(120, 40).Dy() < 20 {
+			t.Fatalf("cores %d displaced charts/processes", cores)
+		}
 	}
 }
 

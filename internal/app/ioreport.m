@@ -3,6 +3,7 @@
 
 #include "smc.h"
 #include "pmp_names.h"
+#include "native_power.h"
 #import <CoreFoundation/CoreFoundation.h>
 #import <CoreWLAN/CoreWLAN.h>
 #import <Foundation/Foundation.h>
@@ -190,6 +191,7 @@ typedef struct {
 static IOReportSubscriptionRef g_subscription = NULL;
 static CFMutableDictionaryRef g_channels = NULL;
 static io_connect_t g_smcConn = 0;
+static unsigned g_validatedPowerDomains = 0;
 static bool g_energyModelCpuGated = false;
 static bool g_energyModelDramGated = false;
 static uint32_t g_gpu_freqs[64];
@@ -821,18 +823,25 @@ static const double kMaxPlausiblePowerWatts = 1000.0;
 //   PD0R  DC-In rail. The internal PSU's output on Mac Studio, so the
 //         whole board. Only reached when PSTR is 0, so laptops (where it
 //         would include battery charging) keep PSTR.
-static double readSystemPower(io_connect_t conn) {
+static double readSystemPowerWithSource(io_connect_t conn, char *source) {
+  if (source) source[0] = 0;
   static const char *keys[] = {"PSTR", "PDTR", "PD0R"};
   for (int scaledOnly = 1; scaledOnly >= 0; scaledOnly--) {
     for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
       if (scaledOnly && !SMCKeyTypeIsScaled(conn, keys[i]))
         continue;
       double w = SMCGetFloatValue(conn, keys[i]);
-      if (w > 0 && w <= kMaxPlausiblePowerWatts)
+      if (w > 0 && w <= kMaxPlausiblePowerWatts) {
+        if (source) snprintf(source, 5, "%s", keys[i]);
         return w;
+      }
     }
   }
   return 0;
+}
+
+static double readSystemPower(io_connect_t conn) {
+  return readSystemPowerWithSource(conn, NULL);
 }
 
 // DRAM power from SMC "PZD1", "PZD2", ... (one per die), for when the
@@ -841,7 +850,7 @@ static double readSystemPower(io_connect_t conn) {
 // threads and stayed at 1.8 W under 12 compute-only threads. The key count is
 // probed once; keys are contiguous from 1.
 //
-static double readDramPower(io_connect_t conn) {
+static double readDramPowerWithValidity(io_connect_t conn, int *valid) {
   static int keyCount = -1;
   char key[5];
   if (keyCount < 0) {
@@ -855,15 +864,22 @@ static double readDramPower(io_connect_t conn) {
     }
   }
   double watts = 0;
+  int complete = keyCount > 0;
   for (int i = 1; i <= keyCount; i++) {
     snprintf(key, sizeof(key), "PZD%d", i);
-    if (!SMCKeyTypeIsScaled(conn, key))
-      continue;
-    double w = SMCGetFloatValue(conn, key);
+    if (!SMCKeyTypeIsScaled(conn, key)) {complete = 0;continue;}
+    double w = 0;
+    if (SMCReadFloatValue(conn, key, &w) != kIOReturnSuccess ||
+        !isfinite(w) || w < 0 || w > kMaxPlausiblePowerWatts) {complete = 0;continue;}
     if (w > 0 && w <= kMaxPlausiblePowerWatts)
       watts += w;
   }
+  if (valid) *valid = complete;
   return watts;
+}
+
+static double readDramPower(io_connect_t conn) {
+  return readDramPowerWithValidity(conn, NULL);
 }
 
 // Residency-weighted average of IOReport histogram buckets labeled
@@ -1129,6 +1145,7 @@ static void calibrateDramBwFromPower(void) {
 
 
 int initIOReport() {
+  g_validatedPowerDomains = 0;
   if (g_channels != NULL) {
     return 0;
   }
@@ -1687,6 +1704,13 @@ typedef struct {
   double dramPower;
   double gpuSramPower;
   double systemPower;
+    char systemPowerKey[5];
+    int cpuPowerSource;
+    int gpuPowerAvailable;
+    int anePowerAvailable;
+    int dramPowerSource;
+    int gpuSramAvailable;
+    int gpuUsageAvailable;
   int gpuFreqMHz;
   double gpuActive;
   double aneActive;
@@ -3318,6 +3342,9 @@ PowerMetrics samplePowerMetrics(int durationMs) {
   int64_t pmpDramCombinedBytes = 0;
   int64_t amcAneReadBytes = 0;
   int64_t amcAneWriteBytes = 0;
+  unsigned energyObserved = 0;
+  unsigned energyInvalid = 0;
+  int dramSMCValid = 0;
   double cpuTotalEnergyW = 0;
   double cpuTypedEnergyW = 0;
   // Per-block vs aggregate buckets for GPU/ANE/DRAM energy (mirrors the CPU
@@ -3384,14 +3411,24 @@ PowerMetrics samplePowerMetrics(int durationMs) {
           strstr(chn, "mCPUs Energy") != NULL;
       if (isTypedCpuEnergy) {
         cpuTypedEnergyW += watts;
+        if (val >= 0 && unitRef != NULL) energyObserved |= 1;
+        else energyInvalid |= 1;
       } else if (strstr(chn, "CPU Energy") != NULL) {
         cpuTotalEnergyW += watts;
+        if (val >= 0 && unitRef != NULL) energyObserved |= 1;
+        else energyInvalid |= 1;
       } else if (strcmp(chn, "GPU Energy") == 0) {
         gpuEnergyNamedW += watts;
+        if (val >= 0 && unitRef != NULL) energyObserved |= 2;
+        else energyInvalid |= 2;
       } else if (strcmp(chn, "GPU") == 0) {
         gpuEnergyAliasW += watts;
+        if (val >= 0 && unitRef != NULL) energyObserved |= 2;
+        else energyInvalid |= 2;
       } else if (strncmp(chn, "GPU SRAM", 8) == 0) {
         metrics.gpuSramPower += watts;
+        if (val >= 0 && unitRef != NULL) energyObserved |= 4;
+        else energyInvalid |= 4;
       } else if (strstr(chn, "ANE") != NULL ||
                  strstr(chn, "NPU") != NULL ||
                  strstr(chn, "Neural") != NULL ||
@@ -3402,14 +3439,22 @@ PowerMetrics samplePowerMetrics(int durationMs) {
         // ANE0_0/ANE0_1 counters so coexisting generations don't double count.
         if (strstr(chn, "Energy") != NULL) {
           aneNamedEnergyW += watts;
+        if (val >= 0 && unitRef != NULL) energyObserved |= 8;
+        else energyInvalid |= 8;
         } else {
           aneBlockEnergyW += watts;
+        if (val >= 0 && unitRef != NULL) energyObserved |= 8;
+        else energyInvalid |= 8;
         }
       } else if (strncmp(chn, "DRAM", 4) == 0) {
         if (strstr(chn, "Energy") != NULL) {
           dramNamedEnergyW += watts;
+        if (val >= 0 && unitRef != NULL) energyObserved |= 16;
+        else energyInvalid |= 16;
         } else {
           dramBlockEnergyW += watts;
+        if (val >= 0 && unitRef != NULL) energyObserved |= 16;
+        else energyInvalid |= 16;
         }
       }
     } else if (strcmp(grp, "GPU Stats") == 0) {
@@ -3446,6 +3491,7 @@ PowerMetrics samplePowerMetrics(int durationMs) {
 
           if (totalTime > 0) {
             metrics.gpuActive = (double)activeTime / (double)totalTime * 100.0;
+            metrics.gpuUsageAvailable = 1;
           }
           if (activeTime > 0 && g_gpu_freq_count > 0) {
             metrics.gpuFreqMHz = (int)(weightedFreq / activeTime);
@@ -3845,7 +3891,7 @@ PowerMetrics samplePowerMetrics(int durationMs) {
   // Same gating as the CPU counters above: latch the SMC DRAM keys on the
   // first sample where the Energy Model reads 0 but SMC shows DRAM power.
   if (g_smcConn) {
-    double smcDramW = readDramPower(g_smcConn);
+    double smcDramW = readDramPowerWithValidity(g_smcConn, &dramSMCValid);
     if (metrics.dramPower <= 0 && smcDramW > 0)
       g_energyModelDramGated = true;
     if (g_energyModelDramGated)
@@ -3990,6 +4036,29 @@ PowerMetrics samplePowerMetrics(int durationMs) {
     metrics.aneIsExclave = aneExclaveDetected; // binary ON/idle only here
   }
 
+  // Preserve validity independently of value. Known functional zero counters
+  // remain valid, but absent/gated channels cannot turn into invented zero watts.
+  energyObserved &= ~energyInvalid;
+  unsigned gated = mactop_power_gated_domains(g_energyModelCpuGated,
+      g_energyModelDramGated, metrics.gpuPower, metrics.gpuSramPower,
+      metrics.anePower, metrics.gpuActive,
+      metrics.aneActive > 0 || haveAneBandwidth);
+  const double domainWatts[5] = {metrics.cpuPower, metrics.gpuPower,
+      metrics.gpuSramPower, metrics.anePower, metrics.dramPower};
+  unsigned available = mactop_power_domains_available(domainWatts,
+      energyObserved, g_validatedPowerDomains, gated);
+  g_validatedPowerDomains |= available;
+  int cpuValid = (available & 1) != 0;
+  int dramValid = (available & 16) != 0;
+  metrics.gpuPowerAvailable = (available & 2) != 0;
+  metrics.gpuSramAvailable = (available & 4) != 0;
+  metrics.anePowerAvailable = (available & 8) != 0;
+  metrics.cpuPowerSource = g_energyModelCpuGated
+      ? (mactop_power_counter_available(pmpCpuW, pmpCpuCount > 0, 1, 0) ? 2 : 0)
+      : (cpuValid ? 1 : 0);
+  metrics.dramPowerSource = g_energyModelDramGated
+      ? (dramSMCValid ? 2 : 0) : (dramValid ? 1 : 0);
+
   // Fallback: estimate DRAM BW from DRAM power after local calibration.
   // DRAM power = static (leakage/refresh) + dynamic (data transfer).
   // Only dynamic power correlates with bandwidth, so subtract idle baseline.
@@ -4042,7 +4111,7 @@ PowerMetrics samplePowerMetrics(int durationMs) {
   // This avoids a redundant HID service enumeration on systems where HID provides good data.
 
   if (g_smcConn) {
-    metrics.systemPower = readSystemPower(g_smcConn);
+    metrics.systemPower = readSystemPowerWithSource(g_smcConn, metrics.systemPowerKey);
   }
 
   // Read fan data

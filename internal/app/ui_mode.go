@@ -20,8 +20,11 @@ var activeUIMode, cliUIMode string
 
 func resolveUIMode(saved, override string) (string, error) {
 	mode := UIModeOriginal
-	if saved == UIModeHtop {
-		mode = saved
+	if saved == UIModeHtop || saved == "btop" {
+		mode = UIModeHtop
+	}
+	if override == "btop" {
+		override = UIModeHtop
 	}
 	if override != "" {
 		if override != UIModeOriginal && override != UIModeHtop {
@@ -36,13 +39,16 @@ func isHtopMode() bool { return activeUIMode == UIModeHtop }
 
 func uiModeName() string {
 	if isHtopMode() {
-		return "htop"
+		return "btop"
 	}
 	return i18n.T("TUI_ModeOriginal")
 }
 
 // Caller holds renderMutex, as with the other presentation updates.
 func setUIMode(mode string) {
+	if mode == "btop" {
+		mode = UIModeHtop
+	}
 	changeModeLayout(mode)
 	currentConfig.UIMode = mode
 	if !isHtopMode() {
@@ -76,7 +82,9 @@ func updateLayoutFooter(width int) {
 	}
 	mainBlock.TitleBottomLeft = fmt.Sprintf(i18n.T("TUI_LayoutInfo"), currentLayoutNum+1, totalLayouts, currentColorName)
 	if isHtopMode() {
-		mainBlock.TitleBottomLeft = " htop | v: " + i18n.T("TUI_ModeOriginal") + " "
+		mainBlock.TitleBottomLeft = " btop · " + btopLayoutName(effectiveLayout()) + " | l/L F2/F6 Tab / f q | v " + i18n.T("TUI_ModeOriginal") + " "
+		mainBlock.TitleBottom = ""
+		return
 	}
 	mainBlock.TitleBottom = ""
 	if width >= 93 {
@@ -260,7 +268,13 @@ func renderWithUIMode(draw func()) {
 		replaceUIValue(&restore, &cpuCoreWidget.TitleBottom, runewidth.Truncate(i18n.T("TUI_CPULegend"), htopTitleWidth(cpuCoreWidget), "…"))
 	}
 	paragraph(NetworkInfo, p.network)
+	if NetworkInfo != nil {
+		replaceUIValue(&restore, &NetworkInfo.Text, btopLegacyNetworkText())
+	}
 	paragraph(PowerChart, p.power)
+	if PowerChart != nil {
+		replaceUIValue(&restore, &PowerChart.Text, btopLegacyPowerText(lastCPUMetrics.PowerReadings))
+	}
 	paragraph(modelText, p.systemInfo)
 	paragraph(helpText, p.text)
 	paragraph(infoParagraph, p.text)

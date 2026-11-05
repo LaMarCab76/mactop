@@ -105,6 +105,10 @@ func applyLayout(layoutName string) {
 }
 
 func setLayoutGrid(layoutName string) {
+	if isHtopMode() && stringIn(layoutName, []string{LayoutDefault, LayoutTop3, LayoutGPUFocus, LayoutEnergy, LayoutProcesses, LayoutNetworkIO}) {
+		grid.Set(ui.NewRow(1.0, &btopDashboard{ui.NewBlock()}))
+		return
+	}
 	if layoutName == LayoutTop3 && isHtopMode() {
 		setHtopDefaultLayoutGrid()
 		return

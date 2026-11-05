@@ -15,6 +15,7 @@ import (
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOKit/IOKitLib.h>
 #include <stdint.h>
+#include "native_power.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -69,6 +70,13 @@ typedef struct {
     double dramPower;
     double gpuSramPower;
     double systemPower;
+    char systemPowerKey[5];
+    int cpuPowerSource;
+    int gpuPowerAvailable;
+    int anePowerAvailable;
+    int dramPowerSource;
+    int gpuSramAvailable;
+    int gpuUsageAvailable;
     int gpuFreqMHz;
     double gpuActive;
     double aneActive;
@@ -147,31 +155,33 @@ type TempSensor struct {
 }
 
 type SocMetrics struct {
-	CPUPower        float64 `json:"cpu_power"`
-	GPUPower        float64 `json:"gpu_power"`
-	ANEPower        float64 `json:"ane_power"`
-	DRAMPower       float64 `json:"dram_power"`
-	GPUSRAMPower    float64 `json:"gpu_sram_power"`
-	SystemPower     float64 `json:"system_power"`
-	TotalPower      float64 `json:"total_power"`
-	GPUFreqMHz      int32   `json:"gpu_freq_mhz"`
-	GPUActive       float64 `json:"gpu_active"`
-	EClusterActive  float64 `json:"e_cluster_active"`
-	PClusterActive  float64 `json:"p_cluster_active"`
-	SClusterActive  float64 `json:"s_cluster_active,omitempty"`
-	EClusterFreqMHz int32   `json:"e_cluster_freq_mhz"`
-	PClusterFreqMHz int32   `json:"p_cluster_freq_mhz"`
-	SClusterFreqMHz int32   `json:"s_cluster_freq_mhz,omitempty"`
-	SocTemp         float32 `json:"soc_temp"`
-	CPUTemp         float32 `json:"cpu_temp"`
-	GPUTemp         float32 `json:"gpu_temp"`
-	DRAMReadBW      float64 `json:"dram_read_bw_gbs"`
-	DRAMWriteBW     float64 `json:"dram_write_bw_gbs"`
-	DRAMBWCombined  float64 `json:"dram_bw_combined_gbs"`
-	ANEReadBW       float64 `json:"ane_read_bw_gbs"`
-	ANEWriteBW      float64 `json:"ane_write_bw_gbs"`
-	ANEBWCombined   float64 `json:"ane_bw_combined_gbs"`
-	ANEActive       float64 `json:"ane_active"`
+	GPUUsageValid   bool          `json:"-" yaml:"-" xml:"-" toon:"-"`
+	PowerReadings   PowerReadings `json:"-" yaml:"-" xml:"-" toon:"-"`
+	CPUPower        float64       `json:"cpu_power"`
+	GPUPower        float64       `json:"gpu_power"`
+	ANEPower        float64       `json:"ane_power"`
+	DRAMPower       float64       `json:"dram_power"`
+	GPUSRAMPower    float64       `json:"gpu_sram_power"`
+	SystemPower     float64       `json:"system_power"`
+	TotalPower      float64       `json:"total_power"`
+	GPUFreqMHz      int32         `json:"gpu_freq_mhz"`
+	GPUActive       float64       `json:"gpu_active"`
+	EClusterActive  float64       `json:"e_cluster_active"`
+	PClusterActive  float64       `json:"p_cluster_active"`
+	SClusterActive  float64       `json:"s_cluster_active,omitempty"`
+	EClusterFreqMHz int32         `json:"e_cluster_freq_mhz"`
+	PClusterFreqMHz int32         `json:"p_cluster_freq_mhz"`
+	SClusterFreqMHz int32         `json:"s_cluster_freq_mhz,omitempty"`
+	SocTemp         float32       `json:"soc_temp"`
+	CPUTemp         float32       `json:"cpu_temp"`
+	GPUTemp         float32       `json:"gpu_temp"`
+	DRAMReadBW      float64       `json:"dram_read_bw_gbs"`
+	DRAMWriteBW     float64       `json:"dram_write_bw_gbs"`
+	DRAMBWCombined  float64       `json:"dram_bw_combined_gbs"`
+	ANEReadBW       float64       `json:"ane_read_bw_gbs"`
+	ANEWriteBW      float64       `json:"ane_write_bw_gbs"`
+	ANEBWCombined   float64       `json:"ane_bw_combined_gbs"`
+	ANEActive       float64       `json:"ane_active"`
 	// ANEPowered is true when ANEActive is the binary ANE power-domain signal
 	// (M5 Max / macOS 27 non-root fallback) rather than a true utilization %.
 	ANEPowered bool `json:"ane_powered,omitempty"`
@@ -293,6 +303,15 @@ func sampleSocMetrics(durationMs int) SocMetrics {
 	aneClusterCount, aneClusterActive := aneClusterActiveSlice(pm)
 
 	return SocMetrics{
+		PowerReadings: PowerReadings{
+			CPU:    powerReading(float64(pm.cpuPower), pm.cpuPowerSource != 0, map[bool]string{true: "PMP:CPU", false: "IOReport:CPU"}[pm.cpuPowerSource == 2]),
+			GPU:    powerReading(float64(pm.gpuPower), pm.gpuPowerAvailable != 0, "IOReport:GPU"),
+			SRAM:   powerReading(float64(pm.gpuSramPower), pm.gpuSramAvailable != 0, "IOReport:SRAM"),
+			ANE:    powerReading(float64(pm.anePower), pm.anePowerAvailable != 0, "IOReport:ANE"),
+			RAM:    powerReading(float64(pm.dramPower), pm.dramPowerSource != 0, map[bool]string{true: "SMC:PZD", false: "IOReport:DRAM"}[pm.dramPowerSource == 2]),
+			Sensor: powerReading(float64(pm.systemPower), pm.systemPowerKey[0] != 0, "SMC:"+C.GoString(&pm.systemPowerKey[0])),
+		},
+		GPUUsageValid:    pm.gpuUsageAvailable != 0,
 		CPUPower:         float64(pm.cpuPower),
 		GPUPower:         float64(pm.gpuPower),
 		ANEPower:         float64(pm.anePower),
@@ -432,4 +451,41 @@ func GetWiFiLinkInfo() *WiFiLinkInfo {
 		TxRateMbps:     int(info.tx_rate_mbps),
 		IsConnected:    info.is_connected != 0,
 	}
+}
+
+// Uses the same native predicate as the producer, without touching hardware.
+func nativePowerCounterAvailable(watts float64, observed, validated, gated bool) bool {
+	var o, v, g C.int
+	if observed {
+		o = 1
+	}
+	if validated {
+		v = 1
+	}
+	if gated {
+		g = 1
+	}
+	return C.mactop_power_counter_available(C.double(watts), o, v, g) != 0
+}
+
+func nativePowerDomainsAvailable(values [5]float64, observed, validated, gated uint32) uint32 {
+	native := [5]C.double{}
+	for i, v := range values {
+		native[i] = C.double(v)
+	}
+	return uint32(C.mactop_power_domains_available(&native[0], C.uint(observed), C.uint(validated), C.uint(gated)))
+}
+
+func nativePowerGatedDomains(cpuGated, dramGated bool, gpu, sram, ane, active float64, aneBusy bool) uint32 {
+	var cpu, dram, busy C.int
+	if cpuGated {
+		cpu = 1
+	}
+	if dramGated {
+		dram = 1
+	}
+	if aneBusy {
+		busy = 1
+	}
+	return uint32(C.mactop_power_gated_domains(cpu, dram, C.double(gpu), C.double(sram), C.double(ane), C.double(active), busy))
 }

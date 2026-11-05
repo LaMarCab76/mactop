@@ -426,6 +426,9 @@ func updateHelpText() {
 		currentConfig.Background,
 		getUpdateInterval(),
 	)
+	if isHtopMode() {
+		fullText = i18n.T("Btop_Help") + "\n\n" + fullText
+	}
 	fullText = fmt.Sprintf(i18n.T("Help_UIMode"), uiModeName()) + "\n" + i18n.T("Settings_Help") + "\n\n" + fullText
 
 	lines := strings.Split(fullText, "\n")
@@ -434,6 +437,10 @@ func updateHelpText() {
 	// Determine if we need scrolling
 	// First calculate raw available height minus borders
 	rawHeight := max(termHeight-2, 1)
+	if isHtopMode() {
+		width, _ := GetCachedTerminalDimensions()
+		rawHeight = max(1, btopContentRect(width, termHeight).Dy()-2)
+	}
 
 	availableHeight := rawHeight
 	maxOffset := 0
@@ -998,6 +1005,9 @@ func updateTotalPowerChart(watts float64) {
 }
 
 func updateCPUUI(cpuMetrics CPUMetrics) {
+	now := time.Now()
+	recordBtopPower(cpuMetrics.PowerReadings, now)
+	btopData.history("cpu").add(now, cpuMetrics.AvgUsage, btopCPUUsageValid(cpuMetrics), "Mach")
 	cpuCoreWidget.UpdateSample(cpuMetrics.CoreUsages, cpuMetrics.CoreBreakdown)
 
 	totalUsage := cpuMetrics.AvgUsage
@@ -1012,6 +1022,7 @@ func updateCPUUI(cpuMetrics CPUMetrics) {
 	updatePowerChartText(cpuMetrics, thermalStr)
 
 	memoryMetrics := getMemoryMetrics()
+	btopMemory = memoryMetrics
 	updateMemoryGaugeTitle(memoryMetrics)
 	if memoryMetrics.Total > 0 {
 		memoryPercent := (float64(memoryMetrics.Used) / float64(memoryMetrics.Total)) * 100
@@ -1538,6 +1549,7 @@ func updateMemoryPressureUI(memoryMetrics MemoryMetrics) {
 }
 
 func updateGPUUI(gpuMetrics GPUMetrics) {
+	btopData.history("gpu").add(time.Now(), gpuMetrics.ActivePercent, gpuMetrics.Valid, "IOReport:GPU activity")
 	if isCompactLayout() {
 		if gpuMetrics.Temp > 0 {
 			gpuGauge.Title = fmt.Sprintf(i18n.T("Metrics_GPUGaugeCompactTemp"), int(gpuMetrics.ActivePercent), formatTemp(float64(gpuMetrics.Temp)))
@@ -1704,6 +1716,8 @@ func getBestLinkInfoString(ethInfo []EthernetLinkInfo, wifiInfo *WiFiLinkInfo) s
 }
 
 func updateNetDiskUI(netdiskMetrics NetDiskMetrics) {
+	now := time.Now()
+	recordBtopRates(netdiskMetrics, now)
 	// Update SSD read history (GB/s) for history_soc layout
 	// Decimal GB/s (bytes/1e9), matching the adjacent DRAM/ANE bandwidth
 	// charts so equal throughput plots at equal height under the shared
@@ -1853,7 +1867,7 @@ func updateTBNetUI(tbStats []ThunderboltNetStats) {
 }
 
 func parseCommandLineFlags() {
-	flag.Func("ui-mode", "TUI mode: original or htop (this session only; v saves the preference)", func(value string) error {
+	flag.Func("ui-mode", "TUI mode: original or btop (htop alias; this session only; v saves the preference)", func(value string) error {
 		if value == "" {
 			return fmt.Errorf(i18n.T("CLI_InvalidUIMode"), value)
 		}

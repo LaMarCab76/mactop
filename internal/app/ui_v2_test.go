@@ -142,6 +142,15 @@ func TestTop3VisibleSnapshotIsKillSourceAndFreezeSource(t *testing.T) {
 	if visibleProcesses[0].PID != 11 || visibleProcesses[1].PID != 22 {
 		t.Fatal("wrong visible rank")
 	}
+	for i := range lastProcesses {
+		lastProcesses[i].BirthTime = int64(lastProcesses[i].PID)
+	}
+	updateProcessList()
+	btopFocus = "memory"
+	applyLayout(runtimeLayout)
+	renderContent(80, 24)
+	handleBtopProcessKey("<Down>")
+	handleBtopProcessKey("<Down>")
 	attemptKillProcess()
 	if !killPending || killPID != 22 {
 		t.Fatal("F9 did not capture visible PID")

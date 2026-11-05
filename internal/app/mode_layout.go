@@ -17,7 +17,13 @@ func resetModeLayouts() {
 
 func activeLayoutOrder() []string {
 	if isHtopMode() {
-		return append(append([]string(nil), layoutOrder...), LayoutTop3)
+		order := []string{LayoutDefault, LayoutGPUFocus, LayoutEnergy, LayoutProcesses, LayoutTop3}
+		for _, layout := range layoutOrder {
+			if !stringIn(layout, order) {
+				order = append(order, layout)
+			}
+		}
+		return order
 	}
 	return layoutOrder
 }

@@ -19,6 +19,7 @@ type CPUUsage struct {
 }
 
 type CPUMetrics struct {
+	PowerReadings                                                    PowerReadings `json:"-" yaml:"-" xml:"-" toon:"-"`
 	EClusterActive, EClusterFreqMHz, PClusterActive, PClusterFreqMHz int
 	SClusterActive, SClusterFreqMHz                                  int
 	ECores, PCores, SCores                                           []int
@@ -55,6 +56,8 @@ type SystemInfo struct {
 }
 
 type NetDiskMetrics struct {
+	NetworkValid      bool    `json:"-" yaml:"-" xml:"-" toon:"-"`
+	DiskValid         bool    `json:"-" yaml:"-" xml:"-" toon:"-"`
 	OutPacketsPerSec  float64 `json:"out_packets_per_sec"`
 	OutBytesPerSec    float64 `json:"out_bytes_per_sec"`
 	InPacketsPerSec   float64 `json:"in_packets_per_sec"`
@@ -66,6 +69,7 @@ type NetDiskMetrics struct {
 }
 
 type GPUMetrics struct {
+	Valid         bool `json:"-" yaml:"-" xml:"-" toon:"-"`
 	FreqMHz       int
 	ActivePercent float64
 	EffectiveLoad float64 // Frequency-adjusted load: Active% * (current / max)

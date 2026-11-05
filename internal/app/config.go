@@ -72,11 +72,28 @@ type OverlayConfig struct {
 
 // New UI preferences do not change the original interface's appearance.
 type HtopConfig struct {
-	Layout     string           `json:"layout,omitempty"`
-	Background string           `json:"background,omitempty"`
-	BarStyle   string           `json:"bar_style,omitempty"`
-	TopMetric  string           `json:"top_metric,omitempty"`
-	Colors     *HtopColorConfig `json:"colors,omitempty"`
+	Layout     string             `json:"layout,omitempty"`
+	Background string             `json:"background,omitempty"`
+	BarStyle   string             `json:"bar_style,omitempty"`
+	TopMetric  string             `json:"top_metric,omitempty"`
+	Colors     *HtopColorConfig   `json:"colors,omitempty"`
+	Power      *BtopPowerConfig   `json:"power,omitempty"`
+	Processes  *BtopProcessConfig `json:"processes,omitempty"`
+}
+
+type BtopPowerConfig struct {
+	Source  string `json:"source,omitempty"`
+	ShowSoC *bool  `json:"show_soc,omitempty"`
+	ShowRAM *bool  `json:"show_ram,omitempty"`
+	ShowANE *bool  `json:"show_ane,omitempty"`
+}
+
+type BtopProcessConfig struct {
+	Mode   string `json:"mode,omitempty"`
+	Count  int    `json:"count,omitempty"`
+	Blocks string `json:"blocks,omitempty"`
+	Name   string `json:"name,omitempty"`
+	User   string `json:"user,omitempty"`
 }
 
 type HtopColorConfig struct {

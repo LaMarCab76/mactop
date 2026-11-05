@@ -205,6 +205,8 @@ func htopConfig() HtopConfig {
 			c.TopMetric = h.TopMetric
 		}
 		c.Colors = h.Colors
+		c.Power = h.Power
+		c.Processes = h.Processes
 	}
 	return c
 }

@@ -49,7 +49,9 @@ func getProcessList(systemGPU float64) ([]ProcessMetrics, error) {
 	return legacyProcessView(all), err
 }
 
-func isTop3Layout() bool { return isHtopMode() && effectiveLayout() == LayoutTop3 }
+func isTop3Layout() bool {
+	return isHtopMode() && effectiveLayout() == LayoutTop3 && btopProcessOptions().Mode != "list"
+}
 
 func top3Processes(all []ProcessMetrics, metric string, query string) ([]ProcessMetrics, int, int) {
 	view := make([]ProcessMetrics, 0, len(all))
@@ -91,6 +93,17 @@ func processRankValue(p ProcessMetrics, metric string) (float64, bool) {
 }
 
 func currentProcessView() ([]ProcessMetrics, int, int) {
+	if isHtopMode() && btopProcessOptions().Mode == "list" {
+		c := btopProcessOptions()
+		view := make([]ProcessMetrics, 0, len(lastProcesses))
+		for _, p := range lastProcesses {
+			if (c.Name == "" || strings.Contains(strings.ToLower(p.Command), strings.ToLower(c.Name))) && (searchText == "" || strings.Contains(strings.ToLower(p.Command), strings.ToLower(searchText))) && (c.User == "" || strings.EqualFold(c.User, p.User)) {
+				view = append(view, p)
+			}
+		}
+		sortProcesses(view)
+		return view, len(view), len(view)
+	}
 	if isTop3Layout() {
 		return top3Processes(lastProcesses, htopConfig().TopMetric, searchText)
 	}

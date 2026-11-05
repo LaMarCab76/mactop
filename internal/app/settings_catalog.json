@@ -5,7 +5,7 @@
     "label_es": "Interfaz preferida",
     "category": "General",
     "kind": "enum",
-    "default": "original (menú nuevo resalta htop si no hay preferencia)",
+    "default": "original (menú nuevo resalta btop si no hay preferencia)",
     "scope": "global",
     "apply": "Selección de menú/v inmediata; editar preferencia desde Ajustes se usa al siguiente proceso sin cambiar el editor",
     "cli": [
@@ -14,7 +14,8 @@
     "note": "--ui-mode sólo esta sesión; flag explícito omite menú.",
     "choices": [
       "original",
-      "htop"
+      "htop",
+      "btop"
     ],
     "apply_en": "Preferred interface for the next process; v switches the current monitor."
   },
@@ -208,7 +209,9 @@
       "history_soc",
       "fan",
       "ports",
-      "top3"
+      "top3",
+      "energy",
+      "processes"
     ],
     "apply_en": "Applied on Start or the next monitor frame; a CLI override remains active for this session."
   },
@@ -235,12 +238,12 @@
     "label": "New UI: top metric",
     "label_es": "Criterio Top 3",
     "category": "Procesos",
-    "kind": "enum",
+    "kind": "legacy-readonly",
     "default": "cpu",
     "scope": "htop Top3",
     "apply": "Inmediato desde muestra completa; no muestreo adicional",
     "cli": [],
-    "note": "UNA lista, confirmado por usuario; RSS para memoria, GPU ms/s/10; descendente y PID ascendente.",
+    "note": "Legacy single-ranking criterion retained for compatibility; use processes.blocks and processes.count.",
     "choices": [
       "cpu",
       "memory",
@@ -1370,5 +1373,145 @@
     ],
     "note": "Se muestra como acción, no como preferencia; no iniciar nuevos servicios/ventiladores al navegar.",
     "apply_en": "Command information; launch explicitly from the CLI. Saving does not run it."
+  },
+  {
+    "key": "htop.power.source",
+    "label": "Power: main series",
+    "label_es": "Potencia: serie principal",
+    "category": "Nueva TUI",
+    "kind": "enum",
+    "default": "auto",
+    "scope": "Nueva TUI",
+    "apply": "Siguiente render; F6 permite aplicar sólo a la sesión.",
+    "cli": [],
+    "note": "Potencia: CPU/GPU y mínimo/máximo de sesión siempre visibles; SoC es cobertura parcial. Filtros antes del ranking. No guarda PID.",
+    "choices": [
+      "auto",
+      "sensor",
+      "sum",
+      "soc",
+      "ram"
+    ],
+    "apply_en": "Next frame; F6 can apply process options for this session only."
+  },
+  {
+    "key": "htop.power.show_soc",
+    "label": "Power: measured SoC",
+    "label_es": "Potencia: SoC medido",
+    "category": "Nueva TUI",
+    "kind": "bool",
+    "default": "true",
+    "scope": "Nueva TUI",
+    "apply": "Siguiente render; F6 permite aplicar sólo a la sesión.",
+    "cli": [],
+    "note": "Potencia: CPU/GPU y mínimo/máximo de sesión siempre visibles; SoC es cobertura parcial. Filtros antes del ranking. No guarda PID.",
+    "choices": [],
+    "apply_en": "Next frame; F6 can apply process options for this session only."
+  },
+  {
+    "key": "htop.power.show_ram",
+    "label": "Power: RAM watts",
+    "label_es": "Potencia: watts RAM",
+    "category": "Nueva TUI",
+    "kind": "bool",
+    "default": "true",
+    "scope": "Nueva TUI",
+    "apply": "Siguiente render; F6 permite aplicar sólo a la sesión.",
+    "cli": [],
+    "note": "Potencia: CPU/GPU y mínimo/máximo de sesión siempre visibles; SoC es cobertura parcial. Filtros antes del ranking. No guarda PID.",
+    "choices": [],
+    "apply_en": "Next frame; F6 can apply process options for this session only."
+  },
+  {
+    "key": "htop.power.show_ane",
+    "label": "Power: ANE watts",
+    "label_es": "Potencia: watts ANE",
+    "category": "Nueva TUI",
+    "kind": "bool",
+    "default": "false",
+    "scope": "Nueva TUI",
+    "apply": "Siguiente render; F6 permite aplicar sólo a la sesión.",
+    "cli": [],
+    "note": "Potencia: CPU/GPU y mínimo/máximo de sesión siempre visibles; SoC es cobertura parcial. Filtros antes del ranking. No guarda PID.",
+    "choices": [],
+    "apply_en": "Next frame; F6 can apply process options for this session only."
+  },
+  {
+    "key": "htop.processes.mode",
+    "label": "Processes: display",
+    "label_es": "Procesos: presentación",
+    "category": "Nueva TUI",
+    "kind": "enum",
+    "default": "tops",
+    "scope": "Nueva TUI",
+    "apply": "Siguiente render; F6 permite aplicar sólo a la sesión.",
+    "cli": [],
+    "note": "Potencia: CPU/GPU y mínimo/máximo de sesión siempre visibles; SoC es cobertura parcial. Filtros antes del ranking. No guarda PID.",
+    "choices": [
+      "tops",
+      "list",
+      "hidden"
+    ],
+    "apply_en": "Next frame; F6 can apply process options for this session only."
+  },
+  {
+    "key": "htop.processes.count",
+    "label": "Processes: Top N",
+    "label_es": "Procesos: Top N",
+    "category": "Nueva TUI",
+    "kind": "enum-int",
+    "default": "3",
+    "scope": "Nueva TUI",
+    "apply": "Siguiente render; F6 permite aplicar sólo a la sesión.",
+    "cli": [],
+    "note": "Potencia: CPU/GPU y mínimo/máximo de sesión siempre visibles; SoC es cobertura parcial. Filtros antes del ranking. No guarda PID.",
+    "choices": [
+      "3",
+      "5",
+      "10"
+    ],
+    "apply_en": "Next frame; F6 can apply process options for this session only."
+  },
+  {
+    "key": "htop.processes.blocks",
+    "label": "Processes: visible blocks",
+    "label_es": "Procesos: bloques visibles",
+    "category": "Nueva TUI",
+    "kind": "list",
+    "default": "cpu,gpu,memory",
+    "scope": "Nueva TUI",
+    "apply": "Siguiente render; F6 permite aplicar sólo a la sesión.",
+    "cli": [],
+    "note": "Potencia: CPU/GPU y mínimo/máximo de sesión siempre visibles; SoC es cobertura parcial. Filtros antes del ranking. No guarda PID.",
+    "choices": [],
+    "apply_en": "Next frame; F6 can apply process options for this session only."
+  },
+  {
+    "key": "htop.processes.name",
+    "label": "Processes: name contains",
+    "label_es": "Procesos: nombre contiene",
+    "category": "Nueva TUI",
+    "kind": "string",
+    "default": "",
+    "scope": "Nueva TUI",
+    "apply": "Siguiente render; F6 permite aplicar sólo a la sesión.",
+    "cli": [],
+    "note": "Potencia: CPU/GPU y mínimo/máximo de sesión siempre visibles; SoC es cobertura parcial. Filtros antes del ranking. No guarda PID.",
+    "choices": [],
+    "apply_en": "Next frame; F6 can apply process options for this session only."
+  },
+  {
+    "key": "htop.processes.user",
+    "label": "Processes: user",
+    "label_es": "Procesos: usuario",
+    "category": "Nueva TUI",
+    "kind": "string",
+    "default": "",
+    "scope": "Nueva TUI",
+    "apply": "Siguiente render; F6 permite aplicar sólo a la sesión.",
+    "cli": [],
+    "note": "Potencia: CPU/GPU y mínimo/máximo de sesión siempre visibles; SoC es cobertura parcial. Filtros antes del ranking. No guarda PID.",
+    "choices": [],
+    "apply_en": "Next frame; F6 can apply process options for this session only."
   }
 ]

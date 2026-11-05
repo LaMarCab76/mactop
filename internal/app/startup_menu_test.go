@@ -121,7 +121,7 @@ func TestStartupMenuRenderingIsClippedAndOrdered(t *testing.T) {
 		}
 		if size.X >= 80 {
 			s := text.String()
-			first, second := strings.Index(s, "1. New TUI (htop)"), strings.Index(s, "2. Original")
+			first, second := strings.Index(s, "1. New TUI (btop)"), strings.Index(s, "2. Original")
 			if first < 0 || second <= first {
 				t.Fatal("startup choices were missing or out of order")
 			}
