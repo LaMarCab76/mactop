@@ -399,6 +399,43 @@ Each command performs its SMC writes, prints the resulting fan state as JSON to 
 
 > **⚠️ Unlike the interactive TUI, `--fan-set` intentionally leaves the fans pinned in manual mode after mactop exits** — that's what makes it usable headlessly. Nothing will restore automatic control until you run `sudo mactop --fan-auto` (or reboot). Pinning fans below their automatic speed under load can cause thermal throttling; the macOS thermal governor may also override manual targets on recent macOS versions.
 
+## Original and htop UI modes
+
+The **Original** mode is the default and keeps the existing layouts and theme
+behavior. Press **`v`** to switch between Original and **htop** and save that
+preference. You can also select a mode for one session:
+
+```sh
+mactop --ui-mode htop
+mactop --ui-mode original
+```
+
+The flag does not change the saved mode, even if you save another setting.
+The preference is stored as `"ui_mode": "original"` or `"ui_mode": "htop"` in
+`config.json`; old configurations continue to use Original.
+
+In htop mode, the default layout shows a full-width panel of per-core CPU bars
+above GPU, memory, ANE, power, network/disk and processes. The CPU bars use
+**blue for nice (low priority), green for user time, and red for system time**.
+All segments and the total come from the same native CPU sample. An unavailable
+sample is shown as `--`. E/P/S labels follow the detected Apple Silicon topology.
+CPU/memory use green accents, GPU/network cyan, ANE magenta, and power yellow.
+History charts use the same component palette; memory-pressure warnings retain
+their warning/critical colors. Memory continues to show macTop's native macOS
+measurement rather than Linux buffer/cache segments.
+
+Other layouts remain available with `l`/`L`. The default htop layout adapts its CPU
+panel to the terminal size. Narrow columns show compact percentages, and a
+`+N cores` message identifies cores that do not fit. Below 18 terminal rows, the
+default htop layout prioritizes CPU and processes; enlarge the terminal to see
+the other panels. The CPU panel's bottom border and `h`/`?` help show the legend.
+
+The htop palette temporarily takes precedence over preset and custom component
+colors. Returning to Original restores those styles and retains your layout,
+background, search, sort and selection. Party mode pauses its automatic theme
+changes while htop is active and resumes in Original. Explicit theme changes
+with `c`/`C` retain their existing behavior. Colors adapt for light terminals.
+
 ## Example Theme (Green) Screenshot (mactop -c green) on Advanced layout (Hit "l" key to toggle)
 
 ![mactop theme](screenshota.png)

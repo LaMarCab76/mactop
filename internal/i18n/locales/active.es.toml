@@ -419,3 +419,11 @@ Info_PowerSupply = "Fuente de alimentación"
 
 TUI_MemoryBandwidthHistory = "Historial de ancho de banda de memoria"
 Metrics_MemBWHistoryDetail = "Ancho de banda DRAM: %.1f GB/s"
+
+# Original / htop UI modes
+TUI_ModeOriginal = "Original"
+CLI_InvalidUIMode = "Modo de interfaz %q inválido: elige original o htop"
+CLI_UIModeHelp = "  --ui-mode original|htop  Modo para esta sesión (v cambia y guarda)"
+Help_UIMode = "Modo de interfaz: %s | v: cambiar y guardar Original/htop\nCPU: azul=baja prioridad, verde=usuario, rojo=sistema | htop pausa el modo fiesta"
+TUI_CPULegend = " azul:nice verde:usuario rojo:sistema "
+TUI_CoresOmitted = "+%d núcleos (agranda la terminal)"

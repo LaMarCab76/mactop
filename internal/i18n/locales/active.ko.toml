@@ -419,3 +419,11 @@ Info_PowerSupply = "전원 공급 장치"
 
 TUI_MemoryBandwidthHistory = "메모리 대역폭 기록"
 Metrics_MemBWHistoryDetail = "DRAM 대역폭: %.1f GB/s"
+
+# Original / htop UI modes
+TUI_ModeOriginal = "Original"
+CLI_InvalidUIMode = "Invalid UI mode %q: choose original or htop"
+CLI_UIModeHelp = "  --ui-mode original|htop  UI mode for this session (v switches and saves)"
+Help_UIMode = "UI mode: %s | v: switch and save Original/htop\nCPU: blue=nice, green=user, red=system | htop pauses party mode"
+TUI_CPULegend = " blue:nice green:user red:system "
+TUI_CoresOmitted = "+%d cores (enlarge terminal)"

@@ -82,6 +82,7 @@ type OverlayConfig struct {
 }
 
 type AppConfig struct {
+	UIMode        string             `json:"ui_mode,omitempty"`
 	Language      string             `json:"language,omitempty"`
 	DefaultLayout string             `json:"default_layout"`
 	Theme         string             `json:"theme"`
@@ -275,6 +276,7 @@ func migrateThemeName(theme string) string {
 }
 
 func loadConfig() {
+	temporaryLayout = false
 	configPath := mactopConfigPath("config.json")
 
 	file, err := os.ReadFile(configPath)
@@ -304,7 +306,16 @@ func saveConfig() {
 	}
 	configPath := filepath.Join(configDir, "config.json")
 
-	data, err := json.MarshalIndent(currentConfig, "", "  ")
+	// Toggle-opened Info/Fan views must not replace the stable layout. Fan
+	// selected by cycling or loaded from config is a persistent layout.
+	config := currentConfig
+	if temporaryLayout {
+		config.DefaultLayout = lastActiveLayout
+		if config.DefaultLayout == "" {
+			config.DefaultLayout = LayoutDefault
+		}
+	}
+	data, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
 		return
 	}

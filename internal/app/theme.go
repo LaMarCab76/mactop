@@ -6,6 +6,7 @@ import (
 
 	ui "github.com/metaspartan/gotui/v5"
 	w "github.com/metaspartan/gotui/v5/widgets"
+	"github.com/metaspartan/mactop/v2/internal/i18n"
 )
 
 // themeOrder defines the order themes cycle through with 'c' key
@@ -625,6 +626,12 @@ func resolveThemeColorString(theme string) string {
 }
 
 func GetProcessTextColor(isCurrentUser bool) string {
+	if isHtopMode() {
+		if isCurrentUser {
+			return htopPalette().textHex
+		}
+		return htopPalette().dimHex
+	}
 	if isCurrentUser {
 		// Prioritize custom ProcessList color if valid
 		if currentConfig.CustomTheme != nil && currentConfig.CustomTheme.ProcessList != "" {
@@ -687,7 +694,11 @@ func cycleTheme(step int) {
 		if IsLightMode && currentColorName == "white" {
 			displayColorName = "black"
 		}
-		mainBlock.TitleBottomLeft = fmt.Sprintf(" %d/%d layout (%s) ", currentLayoutNum+1, totalLayouts, displayColorName)
+		mainBlock.TitleBottomLeft = fmt.Sprintf(i18n.T("TUI_LayoutInfo"), currentLayoutNum+1, totalLayouts, displayColorName)
+		if isHtopMode() {
+			width, _ := GetCachedTerminalDimensions()
+			updateLayoutFooter(width)
+		}
 	}
 }
 

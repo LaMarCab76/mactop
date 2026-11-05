@@ -571,6 +571,9 @@ func getPortsListTitle() (string, ui.Style) {
 	if titleColor == ui.ColorClear {
 		titleColor = GetThemeColorWithLightMode(currentConfig.Theme, IsLightMode)
 	}
+	if isHtopMode() {
+		titleColor = htopPalette().user
+	}
 
 	if killPending {
 		return fmt.Sprintf(i18n.T("TUI_PortsListKill"), killPID), ui.NewStyle(ui.ColorRed, CurrentBgColor, ui.ModifierBold)

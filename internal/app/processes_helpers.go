@@ -14,6 +14,10 @@ func isLightNamedTheme(theme string) bool {
 }
 
 func resolveProcessThemeColor() (string, string) {
+	if isHtopMode() {
+		p := htopPalette()
+		return p.greenHex, p.headerFg
+	}
 	themeColor := processList.TextStyle.Fg
 	var themeColorStr string
 
@@ -83,6 +87,9 @@ func getProcessListTitle() (string, ui.Style) {
 	}
 	if titleColor == ui.ColorClear {
 		titleColor = GetThemeColorWithLightMode(currentConfig.Theme, IsLightMode)
+	}
+	if isHtopMode() {
+		titleColor = htopPalette().user
 	}
 
 	if killPending {

@@ -32,11 +32,12 @@ func noteFanWrites(errs ...error) {
 func toggleInfoLayout() {
 	renderMutex.Lock()
 	if currentConfig.DefaultLayout == LayoutInfo {
-		if lastActiveLayout != "" {
+		if lastActiveLayout != "" && lastActiveLayout != LayoutInfo {
 			currentConfig.DefaultLayout = lastActiveLayout
 		} else {
 			currentConfig.DefaultLayout = LayoutDefault
 		}
+		temporaryLayout = false
 		for i, layout := range layoutOrder {
 			if layout == currentConfig.DefaultLayout {
 				currentLayoutNum = i
@@ -44,7 +45,10 @@ func toggleInfoLayout() {
 			}
 		}
 	} else {
-		lastActiveLayout = currentConfig.DefaultLayout
+		if !temporaryLayout {
+			lastActiveLayout = currentConfig.DefaultLayout
+		}
+		temporaryLayout = true
 		currentConfig.DefaultLayout = LayoutInfo
 		for i, layout := range layoutOrder {
 			if layout == LayoutInfo {
@@ -62,11 +66,12 @@ func toggleInfoLayout() {
 func toggleFanLayout() {
 	renderMutex.Lock()
 	if currentConfig.DefaultLayout == LayoutFan {
-		if lastActiveLayout != "" {
+		if lastActiveLayout != "" && lastActiveLayout != LayoutFan {
 			currentConfig.DefaultLayout = lastActiveLayout
 		} else {
 			currentConfig.DefaultLayout = LayoutDefault
 		}
+		temporaryLayout = false
 		for i, layout := range layoutOrder {
 			if layout == currentConfig.DefaultLayout {
 				currentLayoutNum = i
@@ -74,7 +79,10 @@ func toggleFanLayout() {
 			}
 		}
 	} else {
-		lastActiveLayout = currentConfig.DefaultLayout
+		if !temporaryLayout {
+			lastActiveLayout = currentConfig.DefaultLayout
+		}
+		temporaryLayout = true
 		currentConfig.DefaultLayout = LayoutFan
 		infoScrollOffset = 0
 		for i, layout := range layoutOrder {
@@ -259,8 +267,6 @@ func handleThemeCycle(step int) {
 	w, h := ui.TerminalDimensions()
 	updateLayout(w, h)
 	cycleTheme(step)
-	renderMutex.Unlock()
-	renderMutex.Lock()
 	updateProcessList()
 	w, h = ui.TerminalDimensions()
 	drawScreen(w, h)
@@ -270,9 +276,7 @@ func handleThemeCycle(step int) {
 func handleLayoutCycle(step int) {
 	renderMutex.Lock()
 	cycleLayout(step)
-	renderMutex.Unlock()
 	saveConfig()
-	renderMutex.Lock()
 	w, h := ui.TerminalDimensions()
 	drawScreen(w, h)
 	renderMutex.Unlock()
@@ -283,9 +287,7 @@ func handleLayoutCycle(step int) {
 func handleLayoutSwitchTo(layoutName string) {
 	renderMutex.Lock()
 	switchToLayout(layoutName)
-	renderMutex.Unlock()
 	saveConfig()
-	renderMutex.Lock()
 	w, h := ui.TerminalDimensions()
 	drawScreen(w, h)
 	renderMutex.Unlock()

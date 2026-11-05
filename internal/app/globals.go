@@ -81,7 +81,9 @@ var (
 
 	// previousLayout remembers the layout active before a direct switchToLayout
 	// jump (e.g. the 'a' ANE/BW history shortcut), so the key toggles back.
-	previousLayout string
+	previousLayout          string
+	previousLayoutTemporary bool
+	temporaryLayout         bool // Info/Fan opened by a toggle, rather than selected as a layout.
 
 	// Per-component power histories for the SoC history layout (history_soc)
 	cpuPowerHistory, gpuPowerHistory, anePowerHistory, dramPowerHistory = make([]float64, 100), make([]float64, 100), make([]float64, 100), make([]float64, 100)
@@ -108,6 +110,7 @@ var (
 	updateInterval                = 1000
 	done                          = make(chan struct{})
 	partyTicker                   *time.Ticker
+	partyStop                     chan struct{}
 	lastCPUTimes                  []CPUUsage
 	firstRun                      = true
 	sortReverse                   = false

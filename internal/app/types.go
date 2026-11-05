@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/mattn/go-runewidth"
 	ui "github.com/metaspartan/gotui/v5"
 )
 
@@ -31,6 +32,7 @@ type CPUMetrics struct {
 	ANEReadBW                                                        float64
 	ANEWriteBW                                                       float64
 	CoreUsages                                                       []float64
+	CoreBreakdown                                                    []CPUTimePercent `json:"-"`
 	AvgUsage                                                         float64
 	Throttled                                                        bool
 	CPUTemp                                                          float64
@@ -101,6 +103,8 @@ type EventThrottler struct {
 type CPUCoreWidget struct {
 	*ui.Block
 	cores                              []float64
+	breakdown                          []CPUTimePercent
+	topologyRetries                    int
 	labels                             []string
 	eCoreCount, pCoreCount, sCoreCount int
 	modelName                          string
@@ -197,7 +201,7 @@ func (w *CPUCoreWidget) UpdateUsage(usage []float64) {
 	if len(w.cpuIndexMap) > 0 {
 		w.cores = make([]float64, len(w.cpuIndexMap))
 		for displayIdx, cpuIdx := range w.cpuIndexMap {
-			if cpuIdx < len(usage) {
+			if cpuIdx >= 0 && cpuIdx < len(usage) {
 				w.cores[displayIdx] = usage[cpuIdx]
 			}
 		}
@@ -245,11 +249,17 @@ func (w *CPUCoreWidget) calculateLayout(availableWidth, availableHeight, totalCo
 }
 
 func (w *CPUCoreWidget) drawCore(buf *ui.Buffer, x, y, barWidth, index int, usage float64, themeColor ui.Color) {
+	if y < w.Inner.Min.Y || y >= w.Inner.Max.Y || x < w.Inner.Min.X || barWidth < 3 || x+3 > w.Inner.Max.X {
+		return
+	}
+	usage = finitePercent(usage)
 	labelWidth := 3
 	label := fmt.Sprintf("%d", index)
 	if index < len(w.labels) {
 		label = w.labels[index]
 	}
+	label = runewidth.Truncate(label, min(barWidth, w.Inner.Max.X-x), "")
+	labelWidth = max(labelWidth, runewidth.StringWidth(label))
 	if len(label) < labelWidth {
 		label = fmt.Sprintf("%-*s", labelWidth, label)
 	}
@@ -305,6 +315,13 @@ func (w *CPUCoreWidget) Draw(buf *ui.Buffer) {
 	totalCores := len(w.cores)
 	availableWidth := w.Inner.Dx()
 	availableHeight := w.Inner.Dy()
+	if availableWidth <= 0 || availableHeight <= 0 {
+		return
+	}
+	if isHtopMode() {
+		w.drawHtop(buf)
+		return
+	}
 
 	cols, rows, colXs, colWidths := w.calculateLayout(availableWidth, availableHeight, totalCores)
 	fullCols := totalCores - (rows-1)*cols

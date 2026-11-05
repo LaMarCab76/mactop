@@ -4,7 +4,6 @@ import (
 	"time"
 
 	ui "github.com/metaspartan/gotui/v5"
-	"github.com/metaspartan/mactop/v2/internal/i18n"
 )
 
 func drainCPUMetricsUpdate() {
@@ -111,10 +110,13 @@ func startBackgroundUpdates(done chan struct{}) {
 
 func updateLayout(w, h int) {
 	mainBlock.SetRect(0, 0, w, h)
-	if w < 93 {
-		mainBlock.TitleBottom = ""
-	} else {
-		mainBlock.TitleBottom = i18n.T("TUI_InfoLayoutColorExit")
+	updateLayoutFooter(w)
+	if isHtopMode() && !showHelp {
+		// The CPU row budget depends on both dimensions, not just SetRect.
+		// gotui.Grid.Set appends entries, so rebuild rather than accumulating
+		// old layouts underneath the new one on every resize.
+		grid = ui.NewGrid()
+		setLayoutGrid(currentConfig.DefaultLayout)
 	}
 	if w > 2 && h > 2 {
 		grid.SetRect(1, 1, w-1, h-1)
@@ -126,15 +128,26 @@ func updateLayout(w, h int) {
 
 func drawScreen(w, h int) {
 	ui.Clear()
-	if w > 2 && h > 2 {
-		if killPending {
-			ui.Render(mainBlock, grid, confirmModal)
-		} else {
-			ui.Render(mainBlock, grid)
+	renderContent(w, h)
+}
+
+func renderContent(w, h int) {
+	renderWithUIMode(func() {
+		items := []ui.Drawable{}
+		if isHtopMode() {
+			background := &uiModeBackground{ui.NewBlock()}
+			background.SetRect(0, 0, w, h)
+			items = append(items, background)
 		}
-	} else {
-		ui.Render(mainBlock)
-	}
+		items = append(items, mainBlock)
+		if w > 2 && h > 2 {
+			items = append(items, grid)
+			if killPending {
+				items = append(items, confirmModal)
+			}
+		}
+		ui.Render(items...)
+	})
 }
 
 func handleResizeEvent(e ui.Event) {
@@ -144,6 +157,11 @@ func handleResizeEvent(e ui.Event) {
 	renderMutex.Lock()
 	updateLayout(w, h)
 	drawScreen(w, h)
+	if isHtopMode() && ui.DefaultBackend.Screen != nil {
+		// Resizing a dense layout can leave the terminal's physical contents
+		// out of sync with its cached cells. Force a complete repaint once.
+		ui.DefaultBackend.Screen.Sync()
+	}
 	renderMutex.Unlock()
 }
 
@@ -177,6 +195,8 @@ func handleQuitOrRefreshKeys(key string, done chan struct{}) bool {
 
 func handleThemeLayoutKeys(key string) bool {
 	switch key {
+	case "v":
+		toggleUIMode()
 	case "p":
 		togglePartyMode()
 	case "c":
@@ -224,6 +244,7 @@ func handleIntervalKeys(key string) {
 	}
 
 	if delta != 0 {
+		renderMutex.Lock()
 		updateInterval += delta
 		if updateInterval < 100 {
 			updateInterval = 100
@@ -236,13 +257,12 @@ func handleIntervalKeys(key string) {
 			partyTicker.Reset(time.Duration(updateInterval/2) * time.Millisecond)
 		}
 
-		renderMutex.Lock()
 		updateHelpText()
 		updateModelText()
 		updateIntervalText()
 		currentConfig.Interval = updateInterval
-		renderMutex.Unlock()
 		saveConfig()
+		renderMutex.Unlock()
 	}
 }
 
@@ -286,7 +306,7 @@ func handleKeyboardEvent(e ui.Event, done chan struct{}) {
 	renderMutex.Unlock()
 
 	switch key {
-	case "q", "<C-c>", "r", "p", "c", "C", "l", "L", "h", "?", "i", "b", "B", "f", "F", "o", "m":
+	case "q", "<C-c>", "r", "p", "c", "C", "l", "L", "h", "?", "i", "b", "B", "f", "F", "o", "m", "v":
 		handleModeKeys(key, done)
 	case "-", "_", "+", "=":
 		if !handleFanControlKeys(key) {

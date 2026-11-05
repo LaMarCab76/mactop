@@ -1,11 +1,6 @@
 package app
 
-import (
-	"fmt"
-
-	ui "github.com/metaspartan/gotui/v5"
-	"github.com/metaspartan/mactop/v2/internal/i18n"
-)
+import ui "github.com/metaspartan/gotui/v5"
 
 const (
 	LayoutDefault         = "default"
@@ -57,6 +52,7 @@ func cycleLayout(step int) {
 	n := len(layoutOrder)
 	nextIndex := ((currentIndex+step)%n + n) % n
 	currentConfig.DefaultLayout = layoutOrder[nextIndex]
+	temporaryLayout = false
 	currentLayoutNum = nextIndex
 	totalLayouts = n
 	applyLayout(currentConfig.DefaultLayout)
@@ -67,6 +63,7 @@ func cycleLayout(step int) {
 // again while already on it returns to the previously active layout.
 func switchToLayout(layoutName string) {
 	target := layoutName
+	targetTemporary := false
 	if currentConfig.DefaultLayout == layoutName {
 		// Already on the target layout: toggle back to wherever we came from.
 		// If that is unknown or would be a self-jump (e.g. the user reached
@@ -74,11 +71,15 @@ func switchToLayout(layoutName string) {
 		// to the default layout so the shortcut always leaves the layout
 		// instead of deadlocking on itself.
 		target = previousLayout
+		targetTemporary = previousLayoutTemporary
 		if target == "" || target == layoutName {
 			target = LayoutDefault
+			targetTemporary = false
 		}
 	}
 	previousLayout = currentConfig.DefaultLayout
+	previousLayoutTemporary = temporaryLayout
+	temporaryLayout = targetTemporary
 	for i, layout := range layoutOrder {
 		if layout == target {
 			currentLayoutNum = i
@@ -95,12 +96,7 @@ func applyLayout(layoutName string) {
 	termWidth, termHeight := ui.TerminalDimensions()
 	if mainBlock != nil {
 		mainBlock.SetRect(0, 0, termWidth, termHeight)
-		mainBlock.TitleBottomLeft = fmt.Sprintf(i18n.T("TUI_LayoutInfo"), currentLayoutNum+1, totalLayouts, currentColorName)
-		if termWidth < 93 {
-			mainBlock.TitleBottom = ""
-		} else {
-			mainBlock.TitleBottom = i18n.T("TUI_InfoLayoutColorExit")
-		}
+		updateLayoutFooter(termWidth)
 	}
 	grid = ui.NewGrid()
 
@@ -364,6 +360,10 @@ func setSmallLayoutGrid() {
 }
 
 func setDefaultLayoutGrid() {
+	if isHtopMode() {
+		setHtopDefaultLayoutGrid()
+		return
+	}
 	grid.Set(
 		ui.NewRow(1.0/4,
 			ui.NewCol(1.0/2, cpuGauge),
@@ -388,6 +388,28 @@ func setDefaultLayoutGrid() {
 		ui.NewRow(1.0/4,
 			ui.NewCol(1.0, processList),
 		),
+	)
+}
+
+func setHtopDefaultLayoutGrid() {
+	width, height := GetCachedTerminalDimensions()
+	innerHeight := max(1, height-2)
+	if height < 18 {
+		grid.Set(ui.NewRow(0.55, cpuCoreWidget), ui.NewRow(0.45, processList))
+		return
+	}
+	cols := htopCoreColumns(max(1, width-4))
+	coreHeight := min(max(5, (len(cpuCoreWidget.cores)+cols-1)/cols+2), max(5, innerHeight-14))
+	// gotui truncates fractional grid edges. Bias the first edge by half a
+	// cell so rounding error cannot turn an exact N-row panel into N-1 rows.
+	// The later fixed-height rows inherit the same half-cell bias.
+	coreFraction := (float64(coreHeight) + 0.5) / float64(innerHeight)
+	gaugeFraction, infoFraction := 4.0/float64(innerHeight), 6.0/float64(innerHeight)
+	grid.Set(
+		ui.NewRow(coreFraction, cpuCoreWidget),
+		ui.NewRow(gaugeFraction, ui.NewCol(1.0/3, gpuGauge), ui.NewCol(1.0/3, memoryGauge), ui.NewCol(1.0/3, aneGauge)),
+		ui.NewRow(infoFraction, ui.NewCol(0.4, PowerChart), ui.NewCol(0.6, NetworkInfo)),
+		ui.NewRow(1-coreFraction-gaugeFraction-infoFraction, processList),
 	)
 }
 

@@ -71,6 +71,7 @@ func handleFlag(arg string, idx int, args []string) (int, string, int, bool, boo
 
 func printHelpAndExit() {
 	fmt.Print(i18n.T("CLI_HelpText"))
+	fmt.Println(i18n.T("CLI_UIModeHelp"))
 	os.Exit(0)
 }
 

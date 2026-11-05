@@ -425,6 +425,7 @@ func updateHelpText() {
 		currentConfig.Background,
 		updateInterval,
 	)
+	fullText = fmt.Sprintf(i18n.T("Help_UIMode"), uiModeName()) + "\n\n" + fullText
 
 	lines := strings.Split(fullText, "\n")
 	_, termHeight := GetCachedTerminalDimensions()
@@ -483,14 +484,14 @@ func updateHelpText() {
 }
 
 func toggleHelpMenu() {
+	renderMutex.Lock()
+	defer renderMutex.Unlock()
+
 	showHelp = !showHelp
 	if showHelp {
 		helpScrollOffset = 0
 	}
 	updateHelpText()
-
-	renderMutex.Lock()
-	defer renderMutex.Unlock()
 
 	if showHelp {
 		newGrid := ui.NewGrid()
@@ -509,56 +510,56 @@ func toggleHelpMenu() {
 	} else {
 		applyLayout(currentConfig.DefaultLayout)
 	}
-	ui.Clear()
 	width, height := ui.TerminalDimensions()
-	if width > 2 && height > 2 {
-		ui.Render(mainBlock, grid)
-	} else {
-		ui.Render(mainBlock)
-	}
+	drawScreen(width, height)
 }
 
 func togglePartyMode() {
+	renderMutex.Lock()
+	defer renderMutex.Unlock()
 	partyMode = !partyMode
 	if partyMode {
 		partyTicker = time.NewTicker(time.Duration(updateInterval/2) * time.Millisecond)
+		partyStop = make(chan struct{})
+		ticker, stop := partyTicker, partyStop
 		go func() {
-			for range partyTicker.C {
-				if !partyMode {
-					partyTicker.Stop()
+			for {
+				select {
+				case <-stop:
 					return
+				case <-done:
+					return
+				case <-ticker.C:
 				}
-				cycleTheme(1)
 				renderMutex.Lock()
-				updateProcessList()
-				width, height := ui.TerminalDimensions()
-				ui.Clear()
-				if width > 2 && height > 2 {
-					ui.Render(mainBlock, grid)
-				} else {
-					ui.Render(mainBlock)
+				if partyMode && partyTicker == ticker && advancePartyTheme() {
+					updateProcessList()
+					width, height := ui.TerminalDimensions()
+					drawScreen(width, height)
 				}
 				renderMutex.Unlock()
 			}
 		}()
 	} else if partyTicker != nil {
 		partyTicker.Stop()
+		close(partyStop)
+		partyTicker, partyStop = nil, nil
 	}
+}
+
+func advancePartyTheme() bool {
+	if isHtopMode() {
+		return false
+	}
+	cycleTheme(1)
+	return true
 }
 
 func renderUI() {
 	renderMutex.Lock()
 	defer renderMutex.Unlock()
 	w, h := ui.TerminalDimensions()
-	if w > 2 && h > 2 {
-		if killPending {
-			ui.Render(mainBlock, grid, confirmModal) // Render on top
-		} else {
-			ui.Render(mainBlock, grid)
-		}
-	} else {
-		ui.Render(mainBlock)
-	}
+	renderContent(w, h)
 }
 
 func applyInitialTheme(colorName string, setColor bool) {
@@ -740,8 +741,9 @@ func drainSeededMetrics() {
 func seedInitialMetrics() {
 	m := normalizeSocMetricsPower(sampleSocMetrics(50))
 	thermalLevel := getThermalStateLevel()
-	coreUsages, _ := GetCPUPercentages()
+	coreUsages, breakdown, _ := getCPUPercentagesAndBreakdown()
 	cpuMetrics := cpuMetricsFromSoc(m, coreUsages, averageCPUUsage(coreUsages), thermalStateThrottled(thermalLevel))
+	cpuMetrics.CoreBreakdown = breakdown
 	gpuMetrics := gpuMetricsFromSoc(m)
 	cpuMetricsChan <- cpuMetrics
 	gpuMetricsChan <- gpuMetrics
@@ -807,6 +809,11 @@ func Run() {
 	}
 	currentConfig.Language = resolvedLanguage
 	i18n.Init(resolvedLanguage)
+	activeUIMode, err = resolveUIMode(currentConfig.UIMode, cliUIMode)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
 
 	// If cli.go didn't catch --foreground (e.g., because it used an '=' sign like --foreground=green)
 	// then flag.Parse() will have populated cliFgColor. Update colorName and setColor.
@@ -983,9 +990,7 @@ func updateTotalPowerChart(watts float64) {
 }
 
 func updateCPUUI(cpuMetrics CPUMetrics) {
-	if len(cpuMetrics.CoreUsages) > 0 {
-		cpuCoreWidget.UpdateUsage(cpuMetrics.CoreUsages)
-	}
+	cpuCoreWidget.UpdateSample(cpuMetrics.CoreUsages, cpuMetrics.CoreBreakdown)
 
 	totalUsage := cpuMetrics.AvgUsage
 	cpuGauge.Percent = int(totalUsage)
@@ -1368,7 +1373,7 @@ func formatCPUFreq(cpuMetrics CPUMetrics) string {
 
 func updateCPUGaugeTitles(totalUsage float64, cpuMetrics CPUMetrics) {
 	coreSummary := FormatCoreSummary(cpuCoreWidget.eCoreCount, cpuCoreWidget.pCoreCount, cpuCoreWidget.sCoreCount)
-	totalCPUCores := cpuCoreWidget.eCoreCount + cpuCoreWidget.pCoreCount + cpuCoreWidget.sCoreCount
+	totalCPUCores := len(cpuCoreWidget.cores)
 	cpuFreqStr := formatCPUFreq(cpuMetrics)
 	if isCompactLayout() {
 		cpuGauge.Title = fmt.Sprintf(i18n.T("Metrics_CPUGaugeCompact"), totalUsage, formatTemp(cpuMetrics.CPUTemp))
@@ -1836,6 +1841,16 @@ func updateTBNetUI(tbStats []ThunderboltNetStats) {
 }
 
 func parseCommandLineFlags() {
+	flag.Func("ui-mode", "TUI mode: original or htop (this session only; v saves the preference)", func(value string) error {
+		if value == "" {
+			return fmt.Errorf(i18n.T("CLI_InvalidUIMode"), value)
+		}
+		mode, err := resolveUIMode("", value)
+		if err == nil {
+			cliUIMode = mode
+		}
+		return err
+	})
 	flag.StringVar(&prometheusPort, "prometheus", "", "Port to run Prometheus metrics server on (e.g. :9090)")
 	flag.StringVar(&prometheusPort, "p", "", "Port to run Prometheus metrics server on (e.g. :9090)")
 	flag.BoolVar(&headless, "headless", false, "Run in headless mode (no TUI, output JSON to stdout)")
@@ -1872,11 +1887,7 @@ func parseCommandLineFlags() {
 
 func setupMainBlockLayout(termWidth, termHeight int) {
 	mainBlock.SetRect(0, 0, termWidth, termHeight)
-	if termWidth < 93 {
-		mainBlock.TitleBottom = ""
-	} else {
-		mainBlock.TitleBottom = i18n.T("TUI_InfoLayoutColorExit")
-	}
+	updateLayoutFooter(termWidth)
 	if termWidth > 2 && termHeight > 2 {
 		grid.SetRect(1, 1, termWidth-1, termHeight-1)
 	}

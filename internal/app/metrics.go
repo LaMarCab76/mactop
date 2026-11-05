@@ -485,37 +485,8 @@ func publishPrometheusNetDiskMetrics(metrics NetDiskMetrics) {
 }
 
 func GetCPUPercentages() ([]float64, error) {
-	currentTimes, err := GetCPUUsage()
-	if err != nil {
-		return nil, err
-	}
-	if firstRun {
-		lastCPUTimes = currentTimes
-		firstRun = false
-		return make([]float64, len(currentTimes)), nil
-	}
-	percentages := make([]float64, len(currentTimes))
-	for i := range currentTimes {
-		totalDelta := (currentTimes[i].User - lastCPUTimes[i].User) +
-			(currentTimes[i].System - lastCPUTimes[i].System) +
-			(currentTimes[i].Idle - lastCPUTimes[i].Idle) +
-			(currentTimes[i].Nice - lastCPUTimes[i].Nice)
-
-		activeDelta := (currentTimes[i].User - lastCPUTimes[i].User) +
-			(currentTimes[i].System - lastCPUTimes[i].System) +
-			(currentTimes[i].Nice - lastCPUTimes[i].Nice)
-
-		if totalDelta > 0 {
-			percentages[i] = (activeDelta / totalDelta) * 100.0
-		}
-		if percentages[i] < 0 {
-			percentages[i] = 0
-		} else if percentages[i] > 100 {
-			percentages[i] = 100
-		}
-	}
-	lastCPUTimes = currentTimes
-	return percentages, nil
+	percentages, _, err := getCPUPercentagesAndBreakdown()
+	return percentages, err
 }
 
 func getNetDiskMetrics() NetDiskMetrics {
@@ -647,9 +618,10 @@ func collectMetrics(done chan struct{}, cpumetricsChan chan CPUMetrics, gpumetri
 		rdmaStatus := CheckRDMAAvailable()
 		rdmaStat := rdmaStatus.Status
 
-		coreUsages, _ := GetCPUPercentages()
+		coreUsages, breakdown, _ := getCPUPercentagesAndBreakdown()
 		avgUsage := averageCPUUsage(coreUsages)
 		cpuMetrics := cpuMetricsFromSoc(m, coreUsages, avgUsage, throttled)
+		cpuMetrics.CoreBreakdown = breakdown
 		gpuMetrics := gpuMetricsFromSoc(m)
 
 		// Compute frequency-adjusted effective GPU load (used by history_soc)
