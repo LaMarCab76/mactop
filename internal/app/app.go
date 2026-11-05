@@ -3,6 +3,7 @@
 package app
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -837,6 +838,24 @@ func Run() {
 		stderrLogger.Fatalf("failed to initialize gotui: %v", err)
 	}
 	defer ui.Close()
+	eventContext, cancelEvents := context.WithCancel(context.Background())
+	uiEvents := ui.PollEventsWithContext(eventContext)
+	defer func() {
+		cancelEvents()
+		// The poller wakes its native event queue during cancellation. Let
+		// that finish before ui.Close closes the queue on a menu-only exit.
+		for range uiEvents {
+		}
+	}()
+	if shouldShowStartupMenu() {
+		mode, accepted := chooseStartupUIMode(uiEvents)
+		if !accepted {
+			return
+		}
+		activeUIMode, currentConfig.UIMode = mode, mode
+		saveConfig()
+		defer saveConfigFlush()
+	}
 
 	// Show branded loading screen immediately — gives instant visual feedback
 	// while metrics subsystems initialize (especially DRAM BW calibration on M5+).
@@ -890,7 +909,6 @@ func Run() {
 	go collectProcessMetrics(done, processMetricsChan, portMetricsChan, triggerProcessCollectionChan)
 	go collectNetDiskMetrics(done, netdiskMetricsChan)
 
-	uiEvents := ui.PollEvents()
 	ticker = time.NewTicker(time.Duration(updateInterval) * time.Millisecond)
 
 	startBackgroundUpdates(done)

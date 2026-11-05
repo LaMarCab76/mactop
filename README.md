@@ -401,9 +401,16 @@ Each command performs its SMC writes, prints the resulting fan state as JSON to 
 
 ## Original and htop UI modes
 
-The **Original** mode is the default and keeps the existing layouts and theme
-behavior. Press **`v`** to switch between Original and **htop** and save that
-preference. You can also select a mode for one session:
+Run **`mactop`** to open the startup menu:
+
+1. **New TUI (htop)**
+2. **Original**
+
+Use the arrow keys and Enter, or press `1`/`2` to open a mode directly. `q`, Esc
+or Ctrl-C closes the menu without starting monitoring. The menu highlights your
+last choice and remembers a confirmed selection. Original keeps the existing
+layouts and theme behavior. Press **`v`** inside the monitor to switch modes and
+save that preference. To skip the menu and select a mode for one session:
 
 ```sh
 mactop --ui-mode htop
@@ -412,7 +419,8 @@ mactop --ui-mode original
 
 The flag does not change the saved mode, even if you save another setting.
 The preference is stored as `"ui_mode": "original"` or `"ui_mode": "htop"` in
-`config.json`; old configurations continue to use Original.
+`config.json`. Headless output, native menu bar/overlay modes, diagnostics,
+`--help` and `--version` do not show the startup menu.
 
 In htop mode, the default layout shows a full-width panel of per-core CPU bars
 above GPU, memory, ANE, power, network/disk and processes. The CPU bars use

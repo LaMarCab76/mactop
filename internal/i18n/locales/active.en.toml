@@ -433,3 +433,10 @@ CLI_UIModeHelp = "  --ui-mode original|htop  UI mode for this session (v switche
 Help_UIMode = "UI mode: %s | v: switch and save Original/htop\nCPU: blue=nice, green=user, red=system | htop pauses party mode"
 TUI_CPULegend = " blue:nice green:user red:system "
 TUI_CoresOmitted = "+%d cores (enlarge terminal)"
+
+# Startup interface menu
+TUI_ModeMenuTitle = "macTop - Choose interface"
+TUI_ModeMenuHtop = "1. New TUI (htop)"
+TUI_ModeMenuOriginal = "2. Original"
+TUI_ModeMenuNavigate = "Up/Down: choose   Enter: open"
+TUI_ModeMenuShortcuts = "1/2: open directly   q/Esc: exit"
