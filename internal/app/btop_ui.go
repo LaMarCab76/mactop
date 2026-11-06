@@ -50,21 +50,15 @@ func btopBox(buf *ui.Buffer, rect image.Rectangle, title string, color ui.Color)
 	return b.Inner
 }
 
-func btopPowerHeight(height int, overlay bool) int {
-	if overlay {
-		return 6
-	}
+func btopPowerHeight(height int) int {
 	if effectiveLayout() == LayoutEnergy {
-		return max(5, min(16, height/2))
+		return max(8, min(24, height/2))
 	}
-	if height >= 30 {
-		return 7
-	}
-	return 6
+	return max(8, min(24, height/4))
 }
 
 func btopContentRect(w, h int) image.Rectangle {
-	height := btopPowerHeight(max(0, h-2), activeSettings != nil || showHelp || killPending)
+	height := btopPowerHeight(max(0, h-2))
 	return image.Rect(1, min(max(1, h-1), 1+height), max(1, w-1), max(1, h-1))
 }
 
@@ -207,7 +201,7 @@ func drawBtopPower(buf *ui.Buffer, rect image.Rectangle) {
 // Horizontal positions are sample indices; timestamps describe the real span.
 type btopPlot struct {
 	points           []btopPoint
-	mode, resolution int // ASCII=0, blocks=1, braille=2
+	mode, resolution int // ASCII=0, solid blocks=1; one sample per column.
 	ceiling          float64
 }
 
@@ -215,9 +209,6 @@ func btopGlyphMode() (int, int) {
 	utf8 := true
 	if screen := ui.DefaultBackend.Screen; screen != nil {
 		utf8 = strings.ToUpper(strings.ReplaceAll(screen.CharacterSet(), "-", "")) == "UTF8"
-	}
-	if utf8 && runewidth.RuneWidth('⣿') == 1 && htopConfig().BarStyle != "blocks" {
-		return 2, 2
 	}
 	if utf8 && runewidth.RuneWidth('▁') == 1 {
 		return 1, 1
@@ -278,46 +269,46 @@ func drawBtopPlot(buf *ui.Buffer, area image.Rectangle, plot btopPlot, color ui.
 		return
 	}
 	start := area.Dx()*plot.resolution - len(plot.points)
-	bits := map[image.Point]rune{}
 	style := ui.NewStyle(color, htopEffectiveBg())
+	if plot.ceiling <= 0 || math.IsNaN(plot.ceiling) || math.IsInf(plot.ceiling, 0) {
+		return
+	}
 	for i, point := range plot.points {
-		if math.IsNaN(point.Value) || math.IsInf(point.Value, 0) {
+		if math.IsNaN(point.Value) || math.IsInf(point.Value, 0) || point.Value < 0 {
 			continue
 		}
 		x := start + i
-		if plot.mode == 2 {
-			y := min(area.Dy()*4-1, max(0, int(math.Round(math.Min(1, point.Value/plot.ceiling)*float64(area.Dy()*4-1)))))
-			cell := image.Pt(area.Min.X+x/2, area.Max.Y-1-y/4)
-			dots := [2][4]uint{{6, 2, 1, 0}, {7, 5, 4, 3}}
-			bits[cell] |= rune(1 << dots[x%2][y%4])
-		} else {
-			levels := 1
-			if plot.mode == 1 {
-				levels = 8
-			}
-			y := min(area.Dy()*levels-1, max(0, int(math.Round(math.Min(1, point.Value/plot.ceiling)*float64(area.Dy()*levels-1)))))
-			glyph := '*'
-			if plot.mode == 1 {
-				glyph = '▁' + rune(y%8)
-			}
-			top := area.Max.Y - 1 - y/levels
-			buf.SetCell(ui.NewCell(glyph, style), image.Pt(area.Min.X+x, top))
-			if plot.mode == 1 {
-				for row := top + 1; row < area.Max.Y; row++ {
-					buf.SetCell(ui.NewCell('█', style), image.Pt(area.Min.X+x, row))
-				}
-			}
+		levels, fill := 1, '#'
+		if plot.mode == 1 {
+			levels, fill = 8, '█'
 		}
-	}
-	for point, mask := range bits {
-		buf.SetCell(ui.NewCell('⠀'+mask, style), point)
+		// A measured zero has a thin baseline; missing samples remain gaps.
+		units := max(1, int(math.Ceil(math.Min(1, point.Value/plot.ceiling)*float64(area.Dy()*levels))))
+		top := area.Max.Y - 1 - (units-1)/levels
+		glyph := fill
+		if plot.mode == 1 {
+			glyph = '▁' + rune((units-1)%8)
+		}
+		buf.SetCell(ui.NewCell(glyph, style), image.Pt(area.Min.X+x, top))
+		for row := top + 1; row < area.Max.Y; row++ {
+			buf.SetCell(ui.NewCell(fill, style), image.Pt(area.Min.X+x, row))
+		}
 	}
 }
 
-func drawBtopChart(buf *ui.Buffer, rect image.Rectangle, title, key string, scale float64, color ui.Color) {
+func drawBtopChart(buf *ui.Buffer, rect image.Rectangle, title, key string, scale float64, color ui.Color, details ...string) {
 	inside := btopBox(buf, rect, title, color)
 	if inside.Empty() {
 		return
+	}
+	var compactDetails []string
+	for _, detail := range details {
+		if inside.Dy() < 3 {
+			compactDetails = append(compactDetails, detail)
+			continue
+		}
+		btopText(buf, inside, inside.Min.Y, detail, htopPalette().text)
+		inside.Min.Y++
 	}
 	plot := btopWindow(btopData.history(key), inside.Dx(), scale)
 	if inside.Dy() >= 2 {
@@ -332,13 +323,107 @@ func drawBtopChart(buf *ui.Buffer, rect image.Rectangle, title, key string, scal
 				label = "0–" + formatBytes(plot.ceiling, unit)
 			}
 		}
-		btopText(buf, inside, inside.Max.Y-1, label+" · "+btopSpan(plot), htopPalette().text)
+		info := label + " · " + btopSpan(plot)
+		if len(compactDetails) > 0 {
+			info = label + " · " + strings.Join(compactDetails, " · ")
+			if runewidth.StringWidth(info+" · "+btopSpan(plot)) <= inside.Dx() {
+				info += " · " + btopSpan(plot)
+			}
+		}
+		btopText(buf, inside, inside.Max.Y-1, info, htopPalette().text)
 		inside.Max.Y--
 	}
 	drawBtopPlot(buf, inside, plot, color)
 }
 
 var btopMemory MemoryMetrics
+
+func recordBtopMemory(metrics MemoryMetrics, at time.Time) {
+	btopMemory = metrics
+	valid := metrics.Total > 0 && metrics.Used <= metrics.Total
+	percent := 0.0
+	if valid {
+		percent = 100 * float64(metrics.Used) / float64(metrics.Total)
+	}
+	btopData.history("memory").add(at, percent, valid, fmt.Sprintf("physical:%d", metrics.Total))
+}
+
+func btopMemoryLabel() string {
+	if btopMemory.Total == 0 || btopMemory.Used > btopMemory.Total {
+		return "—"
+	}
+	return fmt.Sprintf("%.1f/%.1f GB · swap %.1f", float64(btopMemory.Used)/1e9, float64(btopMemory.Total)/1e9, float64(btopMemory.SwapUsed)/1e9)
+}
+
+func drawBtopRateHistory(buf *ui.Buffer, area image.Rectangle, key, label, unit string, color ui.Color) {
+	if area.Empty() {
+		return
+	}
+	chart := area
+	legendRect := area
+	if area.Dy() >= 2 {
+		chart.Min.Y++
+	} else {
+		// Keep the auto-scale readable even when only one graph row fits.
+		legendWidth := min(max(0, area.Dx()-2), max(14, area.Dx()/2))
+		legendRect.Max.X = legendRect.Min.X + legendWidth
+		chart.Min.X = min(chart.Max.X, legendRect.Max.X+1)
+	}
+	plot := btopWindow(btopData.history(key), chart.Dx(), 0)
+	legend := label + " 0–" + formatBytes(plot.ceiling, unit)
+	if area.Dy() == 1 && runewidth.StringWidth(legend) > legendRect.Dx() {
+		legend = label + " 0–" + formatBytes(plot.ceiling, "auto")
+	}
+	if area.Dy() >= 2 {
+		span := " · " + btopSpan(plot)
+		if runewidth.StringWidth(legend+span) <= area.Dx() {
+			legend += span
+		}
+	}
+	btopText(buf, legendRect, area.Min.Y, legend, color)
+	drawBtopPlot(buf, chart, plot, color)
+}
+
+// The secondary row contains real histories, even at the 80x24 minimum.
+// Network and disk directions have independent, explicitly labelled axes.
+func drawBtopResourceHistories(buf *ui.Buffer, rect image.Rectangle) {
+	p := htopPalette()
+	for i, title := range []string{i18n.T("Btop_Memory"), i18n.T("Btop_Network"), i18n.T("Btop_Disk")} {
+		r := image.Rect(rect.Min.X+i*rect.Dx()/3, rect.Min.Y, rect.Min.X+(i+1)*rect.Dx()/3, rect.Max.Y)
+		color := p.memory
+		label := btopMemoryLabel()
+		if i == 0 && rect.Dy() < 6 {
+			title += " · 0–100%"
+		}
+		if i == 1 {
+			color, label = p.network, btopNetworkRates(lastNetDiskMetrics)
+		} else if i == 2 {
+			color, label = p.network, btopDiskRates(lastNetDiskMetrics)
+		}
+		inside := btopBox(buf, r, title, color)
+		btopText(buf, inside, inside.Min.Y, label, p.text)
+		inside.Min.Y++
+		if inside.Empty() {
+			continue
+		}
+		if i == 0 {
+			plot := btopWindow(btopData.history("memory"), inside.Dx(), 100)
+			if inside.Dy() >= 3 {
+				btopText(buf, inside, inside.Max.Y-1, "0–100% · "+btopSpan(plot), p.text)
+				inside.Max.Y--
+			}
+			drawBtopPlot(buf, inside, plot, color)
+			continue
+		}
+		keys, labels, unit := []string{"rx", "tx"}, []string{"RX", "TX"}, networkUnit
+		if i == 2 {
+			keys, labels, unit = []string{"disk_r", "disk_w"}, []string{"R", "W"}, diskUnit
+		}
+		mid := inside.Min.Y + inside.Dy()/2
+		drawBtopRateHistory(buf, image.Rect(inside.Min.X, inside.Min.Y, inside.Max.X, mid), keys[0], labels[0], unit, color)
+		drawBtopRateHistory(buf, image.Rect(inside.Min.X, mid, inside.Max.X, inside.Max.Y), keys[1], labels[1], unit, color)
+	}
+}
 
 func btopCPUUsageValid(m CPUMetrics) bool {
 	if len(m.CoreUsages) == 0 || len(m.CoreBreakdown) != len(m.CoreUsages) || math.IsNaN(m.AvgUsage) || math.IsInf(m.AvgUsage, 0) || m.AvgUsage < 0 || m.AvgUsage > 100 {
@@ -375,14 +460,32 @@ func (d *btopDashboard) Draw(buf *ui.Buffer) {
 	if options.Mode != "hidden" {
 		topHeight = min(options.Count+3, max(6, area.Dy()/3))
 	}
-	topHeight = min(topHeight, max(0, area.Dy()-4))
+	minimumGraphs := 9 // CPU/GPU: graph and axis; resources: both rate directions.
+	if layout == LayoutEnergy {
+		minimumGraphs = 4
+	} else if layout == LayoutNetworkIO {
+		minimumGraphs = 8
+	}
+	topHeight = min(topHeight, max(0, area.Dy()-minimumGraphs))
 	graphs := area
 	graphs.Max.Y -= topHeight
-	summaryHeight := 3
-	if graphs.Dy() < 6 {
-		summaryHeight = 0
-		if layout == LayoutEnergy && graphs.Dy() >= 4 {
-			summaryHeight = 1
+	summaryHeight := max(5, graphs.Dy()*2/5)
+	if layout == LayoutEnergy {
+		summaryHeight = 3
+		if graphs.Dy() < 6 {
+			summaryHeight = 0
+			if graphs.Dy() >= 4 {
+				summaryHeight = 1
+			}
+		}
+	} else if layout == LayoutNetworkIO {
+		// At minimum size the four dedicated rate plots need all eight rows.
+		// Each of the two chart rows needs borders, a plot and its axis.
+		// Add the five-row resource section only after reserving all eight.
+		if graphs.Dy() < 13 {
+			summaryHeight = 0
+		} else {
+			summaryHeight = min(summaryHeight, graphs.Dy()-8)
 		}
 	}
 	charts := graphs
@@ -398,7 +501,12 @@ func (d *btopDashboard) Draw(buf *ui.Buffer) {
 		drawBtopChart(buf, image.Rect(charts.Min.X, charts.Min.Y, mid, charts.Max.Y), "CPU · "+btopWatts(btopData.power.CPU), "cpu_w", 0, p.user)
 		drawBtopChart(buf, image.Rect(mid, charts.Min.Y, charts.Max.X, charts.Max.Y), "GPU · "+btopWatts(btopData.power.gpu()), "gpu_w", 0, p.gpu)
 	} else if layout == LayoutGPUFocus {
-		drawBtopChart(buf, charts, btopGPUTitle(), "gpu", 100, p.gpu)
+		ane := aneGaugeInnerLabel(lastCPUMetrics, aneUtilizationPercent(lastCPUMetrics), aneBWLabelMode(lastCPUMetrics))
+		if ane == "" {
+			ane = btopWatts(btopData.power.ANE)
+		}
+		detail := fmt.Sprintf("DRAM R %.1f W %.1f GB/s · ANE %s", lastCPUMetrics.DRAMReadBW, lastCPUMetrics.DRAMWriteBW, ane)
+		drawBtopChart(buf, charts, btopGPUTitle(), "gpu", 100, p.gpu, detail)
 	} else {
 		mid := charts.Min.X + charts.Dx()/2
 		drawBtopChart(buf, image.Rect(charts.Min.X, charts.Min.Y, mid, charts.Max.Y), btopCPUTitle(), "cpu", 100, p.user)
@@ -413,36 +521,7 @@ func (d *btopDashboard) Draw(buf *ui.Buffer) {
 			}
 			btopText(buf, inside, inside.Min.Y, i18n.T("Btop_ExternalUnavailable"), p.text)
 		} else {
-			for i := 0; i < 3; i++ {
-				r := image.Rect(rect.Min.X+i*rect.Dx()/3, rect.Min.Y, rect.Min.X+(i+1)*rect.Dx()/3, rect.Max.Y)
-				label := ""
-				title := ""
-				switch i {
-				case 0:
-					title = i18n.T("Btop_Memory")
-					label = fmt.Sprintf("%.1f/%.1f GB · swap %.1f", float64(btopMemory.Used)/1e9, float64(btopMemory.Total)/1e9, float64(btopMemory.SwapUsed)/1e9)
-					if btopMemory.Total == 0 {
-						label = "—"
-					}
-				case 1:
-					title = i18n.T("Btop_Network")
-					label = btopNetworkRates(lastNetDiskMetrics)
-				case 2:
-					title = i18n.T("Btop_Disk")
-					label = btopDiskRates(lastNetDiskMetrics)
-				}
-				if layout == LayoutGPUFocus && i > 0 {
-					if i == 1 {
-						title = "DRAM"
-						label = fmt.Sprintf("R %.1f W %.1f GB/s", lastCPUMetrics.DRAMReadBW, lastCPUMetrics.DRAMWriteBW)
-					} else {
-						title = "ANE"
-						label = aneGaugeInnerLabel(lastCPUMetrics, aneUtilizationPercent(lastCPUMetrics), aneBWLabelMode(lastCPUMetrics))
-					}
-				}
-				inside := btopBox(buf, r, title, p.memory)
-				btopText(buf, inside, inside.Min.Y, label, p.text)
-			}
+			drawBtopResourceHistories(buf, rect)
 		}
 	}
 	if topHeight > 0 {

@@ -429,8 +429,15 @@ A persistent power panel stays above the content in all New TUI layouts,
 including Settings, help and the F9 confirmation. Energy expands this same
 panel. It always includes its history, current reading, **session minimum and
 maximum**, and CPU/GPU watts. Optional measured SoC, RAM and ANE readings are
-configured under New TUI settings. Graphs use braille when supported, blocks or
-ASCII otherwise. The latest sample is at the right, and the displayed span
+configured under New TUI settings. The power panel grows with terminal height,
+reserving at least eight rows and keeping its height when overlays open. Dashboard histories use
+solid columns filled from the bottom, with eighth-cell Unicode blocks or a
+filled ASCII fallback. Each column is one sample; there are no braille dots.
+Summary and GPU/AI include memory utilization history and separate network
+RX/TX and total-disk read/write histories. Their panels grow with terminal height,
+while the smallest supported terminal keeps a graph row for every series and
+compact rate axes. GPU/AI retains its DRAM/ANE readings at the minimum size.
+The latest sample is at the right, and the displayed span
 uses actual sample timestamps; horizontal positions represent sample indices. Resizing or changing layouts does not reset
 statistics or add samples.
 

@@ -113,12 +113,17 @@ func seedBtopTest(t *testing.T) {
 	lastCPUMetrics.AvgUsage = 34
 	lastCPUMetrics.CoreUsages = []float64{34}
 	lastCPUMetrics.CoreBreakdown = []CPUTimePercent{{User: 34, Valid: true}}
+	oldRates := lastNetDiskMetrics
+	t.Cleanup(func() { lastNetDiskMetrics = oldRates })
+	lastNetDiskMetrics = NetDiskMetrics{InBytesPerSec: 64 * 1024, OutBytesPerSec: 8 * 1024, ReadKBytesPerSec: 1024, WriteKBytesPerSec: 256, NetworkValid: true, DiskValid: true}
 	at := time.Unix(1000, 0)
 	for i := 0; i < 120; i++ {
 		p := PowerReadings{CPU: powerReading(8, true, "PMP"), GPU: powerReading(4, true, "GPU"), RAM: powerReading(2, true, "PZD"), Sensor: powerReading(20+float64(i%10), true, "SMC:PSTR")}
 		recordBtopPower(p, at.Add(time.Duration(i)*time.Second))
 		btopData.history("cpu").add(at.Add(time.Duration(i)*time.Second), float64(i%80), true, "Mach")
 		btopData.history("gpu").add(at.Add(time.Duration(i)*time.Second), float64(i%60), true, "GPU")
+		recordBtopMemory(MemoryMetrics{Used: 30e9, Total: 50e9, SwapUsed: 1e9}, at.Add(time.Duration(i)*time.Second))
+		recordBtopRates(lastNetDiskMetrics, at.Add(time.Duration(i)*time.Second))
 	}
 	lastProcesses = []ProcessMetrics{{PID: 33, CPU: 30, CPUValid: true, RSS: 1, RSSValid: true, GPU: 10, GPUValid: true, Command: "first", User: "alice", BirthTime: 33}, {PID: 22, CPU: 20, CPUValid: true, RSS: 2, RSSValid: true, GPU: 20, GPUValid: true, Command: "second", User: "bob", BirthTime: 22}, {PID: 11, CPU: 10, CPUValid: true, RSS: 3, RSSValid: true, GPU: 30, GPUValid: true, Command: "third", User: "alice", BirthTime: 11}}
 	updateProcessList()
@@ -498,9 +503,9 @@ func TestBtopScaleCoversVisibleSpikeAndDecaysAfterItLeaves(t *testing.T) {
 	for i := 1; i < 20; i++ {
 		short.add(at.Add(time.Duration(i)*time.Second), 5, true, "W")
 	}
-	first := btopWindow(&short, 10, 0)
+	first := btopWindow(&short, 20, 0)
 	short.add(at.Add(20*time.Second), 5, true, "W")
-	second := btopWindow(&short, 10, 0)
+	second := btopWindow(&short, 20, 0)
 	if first.ceiling < 55 || second.ceiling >= first.ceiling || second.ceiling <= 5.5 {
 		t.Fatal("axis dropped abruptly when the spike left", first.ceiling, second.ceiling)
 	}

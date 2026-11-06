@@ -1022,7 +1022,7 @@ func updateCPUUI(cpuMetrics CPUMetrics) {
 	updatePowerChartText(cpuMetrics, thermalStr)
 
 	memoryMetrics := getMemoryMetrics()
-	btopMemory = memoryMetrics
+	recordBtopMemory(memoryMetrics, now)
 	updateMemoryGaugeTitle(memoryMetrics)
 	if memoryMetrics.Total > 0 {
 		memoryPercent := (float64(memoryMetrics.Used) / float64(memoryMetrics.Total)) * 100
